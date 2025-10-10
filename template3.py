@@ -4,20 +4,14 @@ Professional, data-driven design with advanced analytics presentation
 """
 
 from datetime import datetime
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 
 def generate_template3_html(analysis: Dict[str, Any], location_name: str, 
-                            today_str: str, test_email: Optional[str]) -> str:
+                            today_str: str) -> str:
     """Generate HTML for Template 3 (Modern Business Intelligence)"""
-    
-    test_banner = """
-    <div style="background-color: #ff9800; color: white; padding: 14px 32px; text-align: center; font-weight: 600; font-size: 14px;">
-      🧪 TEST MODE ACTIVE - This is a test email for validation purposes
-    </div>
-    """ if test_email else ""
-    
-    test_footer = f'<p style="margin: 10px 0 0 0; color: #ff9800; font-size: 13px; font-weight: 600;">🧪 Test Mode: Email delivered to {test_email}</p>' if test_email else ""
+    test_banner = ""
+    test_footer = ""
     
     # Key metrics with trend indicators
     peak_hour = analysis['summary']['peakHour']

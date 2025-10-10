@@ -3,21 +3,14 @@ Template 2: Enhanced Daily Report Email Template
 """
 
 from datetime import datetime
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 
 def generate_template2_html(analysis: Dict[str, Any], location_name: str, 
-                            today_str: str, test_email: Optional[str]) -> str:
+                            today_str: str) -> str:
     """Generate HTML for Template 2 (Enhanced)"""
-    
-    test_banner = """
-    <div style="background-color: #ff9800; color: white; padding: 12px 24px; text-align: center; font-weight: bold;">
-      🧪 TEST MODE - This is a test email
-    </div>
-    """ if test_email else ""
-    
-    test_footer = f'<p style="margin: 8px 0 0 0; color: #ff9800; font-size: 12px; font-weight: bold;">🧪 Test email sent to: {test_email}</p>' if test_email else ""
-    
+    test_banner = ""
+    test_footer = ""
     # Payment breakdown cards
     payment_cards = ""
     for item in analysis['paymentModeBreakdown']:
