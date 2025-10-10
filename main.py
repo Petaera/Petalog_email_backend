@@ -867,6 +867,20 @@ def get_ses_client():
     return ses_client
 
 
+def get_owner_display_name(owner: Dict[str, Any]) -> str:
+    """Return a display name for an owner using first_name/last_name, fallback to name, email, or id."""
+    if not owner:
+        return 'Unknown'
+    first = (owner.get('first_name') or '').strip()
+    last = (owner.get('last_name') or '').strip()
+    if first or last:
+        return f"{first} {last}".strip()
+    # Backwards compatibility if `name` exists
+    if owner.get('name'):
+        return owner.get('name')
+    return owner.get('email') or owner.get('id') or 'Unknown'
+
+
 def escape_csv(value: Any) -> str:
     """Escape CSV values properly"""
     if value is None or value == "":
@@ -1446,8 +1460,9 @@ def send_reports():
         
         logger.info(f"Found {len(locations)} locations")
         
-        # Fetch ALL owners (not just test mode)
-        response = supabase.table('users').select('id,email,assigned_location,role,name,templateno').eq('role', 'owner').execute()
+    # Fetch ALL owners (not just test mode)
+    # Note: users table uses first_name and last_name instead of a single `name` column
+        response = supabase.table('users').select('id,email,assigned_location,role,first_name,last_name,templateno').eq('role', 'owner').execute()
         owners = response.data
         
         logger.info(f"Found {len(owners) if owners else 0} owners in database")
@@ -1474,7 +1489,7 @@ def send_reports():
                 logger.info(f"Skipping owner {owner['id']}: no email")
                 emails_skipped += 1
                 email_results.append({
-                    'owner': owner.get('name', owner['id']),
+                    'owner': get_owner_display_name(owner),
                     'email': owner.get('email', 'No email'),
                     'status': 'skipped',
                     'reason': 'No email address'
@@ -1498,7 +1513,7 @@ def send_reports():
                 logger.error(f"Failed to fetch logs for owner {owner['email']}: {e}")
                 emails_failed += 1
                 email_results.append({
-                    'owner': owner.get('name', owner['email']),
+                    'owner': get_owner_display_name(owner),
                     'email': owner['email'],
                     'status': 'failed',
                     'error': f"Failed to fetch data: {str(e)}",
@@ -1538,7 +1553,7 @@ Generated on: {datetime.now().strftime("%d/%m/%Y at %H:%M")}"""
                     emails_sent += 1
                     logger.info(f"No-data email sent to {owner['email']}")
                     email_results.append({
-                        'owner': owner.get('name', owner['email']),
+                        'owner': get_owner_display_name(owner),
                         'email': owner['email'],
                         'status': 'success',
                         'recordCount': 0,
@@ -1551,7 +1566,7 @@ Generated on: {datetime.now().strftime("%d/%m/%Y at %H:%M")}"""
                     logger.error(f"Failed to send no-data email to {owner['email']}: {e}")
                     emails_failed += 1
                     email_results.append({
-                        'owner': owner.get('name', owner['email']),
+                        'owner': get_owner_display_name(owner),
                         'email': owner['email'],
                         'status': 'failed',
                         'error': str(e),
@@ -1626,7 +1641,7 @@ Generated on: {datetime.now().strftime("%d/%m/%Y at %H:%M")}"""
                 logger.info(f"Email sent to {owner['email']} ({len(owner_today_logs)} approved records, ₹{analysis['totalRevenue']:,}, {len(attachments)} attachments, Template {owner_template_no})")
                 
                 email_results.append({
-                    'owner': owner.get('name', owner['email']),
+                    'owner': get_owner_display_name(owner),
                     'email': owner['email'],
                     'status': 'success',
                     'recordCount': len(owner_today_logs),
@@ -1640,7 +1655,7 @@ Generated on: {datetime.now().strftime("%d/%m/%Y at %H:%M")}"""
                 logger.error(f"Failed to send email to {owner['email']}: {e}")
                 emails_failed += 1
                 email_results.append({
-                    'owner': owner.get('name', owner['email']),
+                    'owner': get_owner_display_name(owner),
                     'email': owner['email'],
                     'status': 'failed',
                     'error': str(e),
