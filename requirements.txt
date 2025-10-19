@@ -14,3 +14,5 @@ supabase-functions==2.21.1
 pyjwt[crypto]==2.10.1
 boto3==1.34.44
 botocore==1.34.44
+matplotlib==3.9.4
+numpy==2.2.3
