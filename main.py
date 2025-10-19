@@ -1,11 +1,7 @@
-
-
 """
 Daily Reports Email Service
-Converts Supabase Edge Function to Python Flask server
-Works locally and on Render
-Uses AWS SES API instead of SMTP
-Sends reports to all owners with their specific templates
+Modified to fetch data from ONE owner and send to a DIFFERENT email
+Hardcode the email addresses at the top of this file
 """
 
 from flask import Flask, request, jsonify
@@ -37,10 +33,15 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
+# ============================================================================
+# HARDCODE THESE EMAIL ADDRESSES
+# ============================================================================
+SOURCE_OWNER_EMAIL = "owner@example.com"  # Email of the owner whose data to fetch
+SEND_REPORT_TO_EMAIL = "recipient@example.com"  # Email where the report should be sent
+# ============================================================================
+
 # CONFIGURATION VARIABLES
 load_dotenv()
-TEST_EMAIL = os.getenv("TEST_EMAIL")
-TEMPLATE_NO = int(os.getenv("TEMPLATE_NO", "1"))
 
 # Create client options
 options = ClientOptions(
@@ -78,7 +79,6 @@ def get_owner_display_name(owner: Dict[str, Any]) -> str:
     last = (owner.get('last_name') or '').strip()
     if first or last:
         return f"{first} {last}".strip()
-    # Backwards compatibility if `name` exists
     if owner.get('name'):
         return owner.get('name')
     return owner.get('email') or owner.get('id') or 'Unknown'
@@ -96,166 +96,6 @@ def escape_csv(value: Any) -> str:
         return f'"{escaped}"'
     
     return str_value
-
-
-def generate_no_data_email_html(location_name: str, today_str: str, test_email: Optional[str]) -> str:
-    """Generate HTML for no-data notification email"""
-    test_banner = f"""
-    <div style="background-color: #ff9800; color: white; padding: 12px 24px; text-align: center; font-weight: bold;">
-      TEST MODE - This is a test email
-    </div>
-    """ if test_email else ""
-    
-    test_footer = f'<p style="margin: 8px 0 0 0; color: #ff9800; font-size: 12px; font-weight: bold;">Test email sent to: {test_email}</p>' if test_email else ""
-    
-    return f"""
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>No Data Report</title>
-</head>
-<body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f5f5f5;">
-  <div style="max-width: 600px; margin: 40px auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
-    
-    {test_banner}
-    
-    <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 32px 24px; text-align: center;">
-      <h1 style="margin: 0; font-size: 28px; font-weight: 600;">No Data Today</h1>
-      <p style="margin: 8px 0 0 0; font-size: 14px; opacity: 0.9;">{today_str}</p>
-    </div>
-    
-    <div style="padding: 40px 24px;">
-      <div style="background-color: #f8f9fa; border-left: 4px solid #667eea; padding: 20px; border-radius: 4px; margin-bottom: 24px;">
-        <h2 style="margin: 0 0 8px 0; font-size: 18px; color: #333;">Location: {location_name}</h2>
-        <p style="margin: 0; color: #666; font-size: 14px;">No approved transactions were recorded for today.</p>
-      </div>
-      
-      <div style="text-align: center; padding: 20px; background-color: #fff3cd; border-radius: 4px; border: 1px solid #ffc107;">
-        <p style="margin: 0; color: #856404; font-size: 15px;">
-          There are no approved logs to report for {today_str}.
-        </p>
-      </div>
-    </div>
-    
-    <div style="background-color: #f8f9fa; padding: 20px 24px; border-top: 1px solid #e9ecef; text-align: center;">
-      <p style="margin: 0; color: #6c757d; font-size: 12px;">
-        Report generated on {datetime.now().strftime("%d/%m/%Y at %H:%M")}
-      </p>
-      {test_footer}
-    </div>
-    
-  </div>
-</body>
-</html>
-    """.strip()
-
-
-def generate_summary_report_html(summary_data: Dict[str, Any], today_str: str) -> str:
-    """Generate HTML summary report of email sending process"""
-    
-    success_count = summary_data['successCount']
-    failed_count = summary_data['failedCount']
-    skipped_count = summary_data['skippedCount']
-    total_count = summary_data['totalCount']
-    total_revenue = summary_data['totalRevenue']
-    total_records = summary_data['totalRecords']
-    
-    # Build results table
-    results_html = ""
-    for result in summary_data['results']:
-        status_color = 'green' if result['status'] == 'success' else 'red' if result['status'] == 'failed' else 'orange'
-        status_symbol = '✓' if result['status'] == 'success' else '✗' if result['status'] == 'failed' else '⊘'
-        
-        results_html += f"""
-        <tr>
-            <td style="padding: 10px; border-bottom: 1px solid #ddd; color: {status_color};">{status_symbol} {result['status'].upper()}</td>
-            <td style="padding: 10px; border-bottom: 1px solid #ddd;">{result['owner']}</td>
-            <td style="padding: 10px; border-bottom: 1px solid #ddd;">{result['email']}</td>
-            <td style="padding: 10px; border-bottom: 1px solid #ddd; text-align: center;">{result.get('recordCount', 'N/A')}</td>
-            <td style="padding: 10px; border-bottom: 1px solid #ddd; text-align: right;">₹{result.get('revenue', 0):,}</td>
-            <td style="padding: 10px; border-bottom: 1px solid #ddd;">{result.get('templateUsed', 'N/A')}</td>
-            <td style="padding: 10px; border-bottom: 1px solid #ddd;">{result.get('error', 'N/A')}</td>
-        </tr>
-        """
-    
-    return f"""
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Daily Reports Summary</title>
-</head>
-<body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f5f5f5;">
-  <div style="max-width: 1000px; margin: 40px auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
-    
-    <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 32px 24px; text-align: center;">
-      <h1 style="margin: 0; font-size: 28px; font-weight: 600;">Daily Reports Summary</h1>
-      <p style="margin: 8px 0 0 0; font-size: 14px; opacity: 0.9;">{today_str}</p>
-    </div>
-    
-    <div style="padding: 40px 24px;">
-      
-      <!-- Stats Overview -->
-      <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 20px; margin-bottom: 30px;">
-        <div style="background: #e8f5e9; border-left: 4px solid #4caf50; padding: 20px; border-radius: 4px;">
-          <h3 style="margin: 0; color: #2e7d32; font-size: 24px;">{success_count}</h3>
-          <p style="margin: 5px 0 0 0; color: #558b2f; font-size: 14px;">Successful</p>
-        </div>
-        <div style="background: #ffebee; border-left: 4px solid #f44336; padding: 20px; border-radius: 4px;">
-          <h3 style="margin: 0; color: #c62828; font-size: 24px;">{failed_count}</h3>
-          <p style="margin: 5px 0 0 0; color: #d32f2f; font-size: 14px;">Failed</p>
-        </div>
-        <div style="background: #fff3e0; border-left: 4px solid #ff9800; padding: 20px; border-radius: 4px;">
-          <h3 style="margin: 0; color: #e65100; font-size: 24px;">{skipped_count}</h3>
-          <p style="margin: 5px 0 0 0; color: #ef6c00; font-size: 14px;">Skipped</p>
-        </div>
-        <div style="background: #f3e5f5; border-left: 4px solid #9c27b0; padding: 20px; border-radius: 4px;">
-          <h3 style="margin: 0; color: #6a1b9a; font-size: 24px;">{total_count}</h3>
-          <p style="margin: 5px 0 0 0; color: #7b1fa2; font-size: 14px;">Total Owners</p>
-        </div>
-      </div>
-      
-      <!-- Revenue Summary -->
-      <div style="background-color: #f8f9fa; border: 1px solid #dee2e6; padding: 20px; border-radius: 4px; margin-bottom: 30px;">
-        <h2 style="margin: 0 0 15px 0; font-size: 18px; color: #333;">Revenue Summary</h2>
-        <p style="margin: 5px 0; color: #666; font-size: 14px;">Total Revenue: <strong style="font-size: 20px; color: #2e7d32;">₹{total_revenue:,}</strong></p>
-        <p style="margin: 5px 0; color: #666; font-size: 14px;">Total Records: <strong>{total_records}</strong></p>
-      </div>
-      
-      <!-- Results Table -->
-      <h2 style="margin: 30px 0 15px 0; font-size: 18px; color: #333;">Detailed Results</h2>
-      <table style="width: 100%; border-collapse: collapse; border: 1px solid #ddd;">
-        <thead>
-          <tr style="background-color: #f5f5f5;">
-            <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd; font-weight: 600;">Status</th>
-            <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd; font-weight: 600;">Owner</th>
-            <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd; font-weight: 600;">Email</th>
-            <th style="padding: 12px; text-align: center; border-bottom: 2px solid #ddd; font-weight: 600;">Records</th>
-            <th style="padding: 12px; text-align: right; border-bottom: 2px solid #ddd; font-weight: 600;">Revenue</th>
-            <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd; font-weight: 600;">Template</th>
-            <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd; font-weight: 600;">Error</th>
-          </tr>
-        </thead>
-        <tbody>
-          {results_html}
-        </tbody>
-      </table>
-      
-    </div>
-    
-    <div style="background-color: #f8f9fa; padding: 20px 24px; border-top: 1px solid #e9ecef; text-align: center;">
-      <p style="margin: 0; color: #6c757d; font-size: 12px;">
-        Report generated on {datetime.now().strftime("%d/%m/%Y at %H:%M")}
-      </p>
-    </div>
-    
-  </div>
-</body>
-</html>
-    """.strip()
 
 
 def fetch_today_filtered_logs(location_id: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -595,7 +435,7 @@ def send_email_with_attachments_ses(from_email: str, to_email: str, subject: str
 
 @app.route('/send-reports', methods=['POST'])
 def send_reports():
-    """Main endpoint to send daily reports"""
+    """Main endpoint to send daily report from one owner to another email"""
     
     auth_header = request.headers.get('Authorization')
     if not auth_header or not auth_header.startswith('Bearer '):
@@ -621,14 +461,8 @@ def send_reports():
     logger.info('Authorization verified successfully')
     
     try:
-        logger.info("Starting daily reports generation...")
-        
-        test_email = TEST_EMAIL
-        
-        if test_email:
-            logger.info(f"TEST MODE ENABLED: Will send to {test_email} only")
-        else:
-            logger.info("PRODUCTION MODE: Will send to all owners")
+        logger.info(f"Starting report generation for owner: {SOURCE_OWNER_EMAIL}")
+        logger.info(f"Report will be sent to: {SEND_REPORT_TO_EMAIL}")
         
         # Validate environment variables
         required_vars = ['AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'SES_VERIFIED_FROM']
@@ -638,7 +472,7 @@ def send_reports():
         
         from_email = os.getenv('SES_VERIFIED_FROM')
         
-    # Validate email format
+        # Validate email format
         email_regex = r'^[^\s@]+@[^\s@]+\.[^\s@]+'
         clean_email = re.search(r'<([^>]+)>', from_email)
         clean_email = clean_email.group(1) if clean_email else from_email
@@ -652,7 +486,7 @@ def send_reports():
         today = datetime.now()
         today_str = today.strftime("%d/%m/%Y")
         
-        logger.info(f"Generating reports for date: {today_str}")
+        logger.info(f"Generating report for date: {today_str}")
         
         # Get locations
         response = supabase.table('locations').select('*').execute()
@@ -663,12 +497,14 @@ def send_reports():
         
         logger.info(f"Found {len(locations)} locations")
         
-    # Fetch ALL owners (not just test mode)
-    # Note: users table uses first_name and last_name instead of a single `name` column
-        response = supabase.table('users').select('id,email,assigned_location,role,first_name,last_name,templateno').eq('role', 'owner').execute()
-        owners = response.data
+        # Fetch the specific owner by email
+        response = supabase.table('users').select('id,email,assigned_location,role,first_name,last_name,templateno').eq('email', SOURCE_OWNER_EMAIL).eq('role', 'owner').execute()
         
-        logger.info(f"Found {len(owners) if owners else 0} owners in database")
+        if not response.data or len(response.data) == 0:
+            raise Exception(f"Owner not found with email: {SOURCE_OWNER_EMAIL}")
+        
+        owner = response.data[0]
+        logger.info(f"Found owner: {get_owner_display_name(owner)}")
         
         # Verify SES connection
         try:
@@ -679,122 +515,65 @@ def send_reports():
             logger.error(f"SES verification failed: {e}")
             raise Exception(f"SES configuration invalid: {str(e)}")
         
-        emails_sent = 0
-        emails_failed = 0
-        emails_skipped = 0
-        email_results = []
-        total_revenue_summary = 0
-        total_records_summary = 0
+        # Get template number for this owner (default to 1)
+        owner_template_no = owner.get('templateno', 1)
+        if owner_template_no is None:
+            owner_template_no = 1
         
-        # Process each owner
-        for owner in (owners or []):
-            if not owner.get('email'):
-                logger.info(f"Skipping owner {owner['id']}: no email")
-                emails_skipped += 1
-                email_results.append({
-                    'owner': get_owner_display_name(owner),
-                    'email': owner.get('email', 'No email'),
-                    'status': 'skipped',
-                    'reason': 'No email address'
-                })
-                continue
-            
-            # Get template number for this owner (default to 1)
-            owner_template_no = owner.get('templateno', 1)
-            if owner_template_no is None:
-                owner_template_no = 1
-            
-            # Determine location context
-            current_location = owner.get('assigned_location')
-            
-            logger.info(f"Processing owner {owner['email']} (Location: {current_location or 'All locations'}, Template: {owner_template_no})")
-            
-            # Fetch logs for this owner
-            try:
-                owner_today_logs = fetch_today_filtered_logs(current_location)
-            except Exception as e:
-                logger.error(f"Failed to fetch logs for owner {owner['email']}: {e}")
-                emails_failed += 1
-                email_results.append({
-                    'owner': get_owner_display_name(owner),
-                    'email': owner['email'],
-                    'status': 'failed',
-                    'error': f"Failed to fetch data: {str(e)}",
-                    'templateUsed': owner_template_no
-                })
-                continue
-            
-            # Determine location name
-            location_name = "All Locations"
-            if current_location:
-                for loc in locations:
-                    if loc['id'] == current_location:
-                        location_name = loc['name']
-                        break
-            
-            # Send no-data email if no logs
-            if len(owner_today_logs) == 0:
-                logger.info(f"Sending no-data notification to admin inbox (a6hinandh@gmail.com) for {location_name}")
-                try:
-                    no_data_html = generate_no_data_email_html(location_name, today_str, None)
-                    no_data_text = f"""No Data Report - {today_str}
+        # Determine location context
+        current_location = owner.get('assigned_location')
+        
+        logger.info(f"Owner location: {current_location or 'All locations'}, Template: {owner_template_no}")
+        
+        # Fetch logs for this owner
+        try:
+            owner_today_logs = fetch_today_filtered_logs(current_location)
+        except Exception as e:
+            logger.error(f"Failed to fetch logs for owner {owner['email']}: {e}")
+            raise Exception(f"Failed to fetch data: {str(e)}")
+        
+        # Determine location name
+        location_name = "All Locations"
+        if current_location:
+            for loc in locations:
+                if loc['id'] == current_location:
+                    location_name = loc['name']
+                    break
+        
+        # Check if there's any data
+        if len(owner_today_logs) == 0:
+            logger.info(f"No data found for {location_name}")
+            return jsonify({
+                'success': True,
+                'message': f"No approved transactions found for {location_name} on {today_str}",
+                'emailsSent': 0,
+                'dataOwner': get_owner_display_name(owner),
+                'dataOwnerEmail': SOURCE_OWNER_EMAIL,
+                'recipientEmail': SEND_REPORT_TO_EMAIL,
+                'recordCount': 0,
+                'revenue': 0,
+                'location': location_name,
+                'reportDate': today_str
+            }), 200
+        
+        # Send full report
+        logger.info(f"Processing {len(owner_today_logs)} approved records for {location_name} (Template {owner_template_no})")
+        
+        # Generate analysis
+        analysis = analyze_data(owner_today_logs, locations)
+        
+        # Generate CSVs
+        report_csv = generate_report_csv(owner_today_logs, locations)
+        payment_csv = generate_payment_breakdown_csv(owner_today_logs)
+        service_csv = generate_service_breakdown_csv(owner_today_logs)
+        
+        # Generate HTML with owner's template
+        html_content = generate_email_html(analysis, location_name, today_str, owner_template_no)
+        
+        # Generate text version
+        text_content = f"""{'Business Intelligence Report' if owner_template_no == 3 else 'Daily Business Report'} - {today_str}
 
-Location: {location_name}
-Status: No approved transactions recorded for today.
-
-Generated on: {datetime.now().strftime("%d/%m/%Y at %H:%M")}"""
-                    
-                    send_email_with_attachments_ses(
-                        from_email,
-                        "a6hinandh@gmail.com",
-                        f"No Data Today - {today_str} - {location_name}",
-                        no_data_html,
-                        no_data_text,
-                        []
-                    )
-                    
-                    emails_sent += 1
-                    logger.info(f"No-data email sent to admin inbox (a6hinandh@gmail.com)")
-                    email_results.append({
-                        'owner': get_owner_display_name(owner),
-                        'email': "a6hinandh@gmail.com",
-                        'status': 'success',
-                        'recordCount': 0,
-                        'revenue': 0,
-                        'location': location_name,
-                        'emailType': 'no-data',
-                        'templateUsed': owner_template_no
-                    })
-                except Exception as e:
-                    logger.error(f"Failed to send no-data email to {owner['email']}: {e}")
-                    emails_failed += 1
-                    email_results.append({
-                        'owner': get_owner_display_name(owner),
-                        'email': owner['email'],
-                        'status': 'failed',
-                        'error': str(e),
-                        'templateUsed': owner_template_no
-                    })
-                continue
-            
-            # Send full report
-            try:
-                logger.info(f"Processing {owner['email']} - {len(owner_today_logs)} approved records for {location_name} (Template {owner_template_no})")
-                
-                # Generate analysis
-                analysis = analyze_data(owner_today_logs, locations)
-                
-                # Generate CSVs
-                report_csv = generate_report_csv(owner_today_logs, locations)
-                payment_csv = generate_payment_breakdown_csv(owner_today_logs)
-                service_csv = generate_service_breakdown_csv(owner_today_logs)
-                
-                # Generate HTML with owner's template
-                html_content = generate_email_html(analysis, location_name, today_str, owner_template_no)
-                
-                # Generate text version
-                text_content = f"""{'Business Intelligence Report' if owner_template_no == 3 else 'Daily Business Report'} - {today_str}
-
+Data Owner: {get_owner_display_name(owner)} ({SOURCE_OWNER_EMAIL})
 Location: {location_name}
 Total Revenue: ₹{analysis['totalRevenue']:,}  
 {'Transactions' if owner_template_no == 3 else 'Vehicles Served'}: {analysis['totalVehicles']}
@@ -808,121 +587,53 @@ SERVICE BREAKDOWN:
 
 Template Used: {owner_template_no} {'(Modern Business Intelligence)' if owner_template_no == 3 else ''}
 Generated on: {datetime.now().strftime("%d/%m/%Y at %H:%M")}"""
-                
-                # Prepare attachments
-                location_safe = re.sub(r'[^a-zA-Z0-9]', '-', location_name).lower()
-                date_str = today.strftime("%Y-%m-%d")
-                attachments = [
-                    {
-                        'filename': f"{'transaction_report' if owner_template_no == 3 else 'daily_report'}_{date_str}_{location_safe}.csv",
-                        'content': report_csv
-                    },
-                    {
-                        'filename': f"payment_{'analytics' if owner_template_no == 3 else 'breakdown'}_{date_str}_{location_safe}.csv",
-                        'content': payment_csv
-                    },
-                    {
-                        'filename': f"service_{'performance' if owner_template_no == 3 else 'breakdown'}_{date_str}_{location_safe}.csv",
-                        'content': service_csv
-                    }
-                ]
-                
-                # Send email using SES API
-                send_email_with_attachments_ses(
-                    from_email,
-                    "a6hinandh@gmail.com",
-                    f"{'Business Intelligence Report' if owner_template_no == 3 else 'Daily Report'} - {today_str} - {location_name}",
-                    html_content,
-                    text_content,
-                    attachments
-                )
-                
-                emails_sent += 1
-                total_revenue_summary += analysis['totalRevenue']
-                total_records_summary += len(owner_today_logs)
-                
-                logger.info(f"Email sent to {owner['email']} ({len(owner_today_logs)} approved records, ₹{analysis['totalRevenue']:,}, {len(attachments)} attachments, Template {owner_template_no})")
-                
-                email_results.append({
-                    'owner': get_owner_display_name(owner),
-                    'email': owner['email'],
-                    'status': 'success',
-                    'recordCount': len(owner_today_logs),
-                    'revenue': analysis['totalRevenue'],
-                    'location': location_name,
-                    'attachments': len(attachments),
-                    'templateUsed': owner_template_no,
-                    'emailType': 'full-report'
-                })
-            except Exception as e:
-                logger.error(f"Failed to send email to {owner['email']}: {e}")
-                emails_failed += 1
-                email_results.append({
-                    'owner': get_owner_display_name(owner),
-                    'email': owner['email'],
-                    'status': 'failed',
-                    'error': str(e),
-                    'templateUsed': owner_template_no
-                })
         
-        # Prepare summary data
-        summary_data = {
-            'successCount': emails_sent,
-            'failedCount': emails_failed,
-            'skippedCount': emails_skipped,
-            'totalCount': len(owners) if owners else 0,
-            'totalRevenue': total_revenue_summary,
-            'totalRecords': total_records_summary,
-            'results': email_results
-        }
+        # Prepare attachments
+        location_safe = re.sub(r'[^a-zA-Z0-9]', '-', location_name).lower()
+        date_str = today.strftime("%Y-%m-%d")
+        attachments = [
+            {
+                'filename': f"{'transaction_report' if owner_template_no == 3 else 'daily_report'}_{date_str}_{location_safe}.csv",
+                'content': report_csv
+            },
+            {
+                'filename': f"payment_{'analytics' if owner_template_no == 3 else 'breakdown'}_{date_str}_{location_safe}.csv",
+                'content': payment_csv
+            },
+            {
+                'filename': f"service_{'performance' if owner_template_no == 3 else 'breakdown'}_{date_str}_{location_safe}.csv",
+                'content': service_csv
+            }
+        ]
         
-        # Generate and send summary report to admin email
-        try:
-            summary_html = generate_summary_report_html(summary_data, today_str)
-            summary_text = f"""Daily Reports Summary - {today_str}
-
-Successful: {emails_sent}
-Failed: {emails_failed}
-Skipped: {emails_skipped}
-Total Owners: {len(owners) if owners else 0}
-
-Total Revenue: ₹{total_revenue_summary:,}
-Total Records: {total_records_summary}
-
-Generated on: {datetime.now().strftime("%d/%m/%Y at %H:%M")}"""
-            
-            send_email_with_attachments_ses(
-                from_email,
-                from_email,
-                f"Daily Reports Summary - {today_str}",
-                summary_html,
-                summary_text,
-                []
-            )
-            
-            logger.info(f"Summary report sent to admin email: {from_email}")
-        except Exception as e:
-            logger.error(f"Failed to send summary report: {e}")
+        # Send email using SES API to the specified recipient
+        send_email_with_attachments_ses(
+            from_email,
+            SEND_REPORT_TO_EMAIL,
+            f"{'Business Intelligence Report' if owner_template_no == 3 else 'Daily Report'} - {today_str} - {location_name} [{get_owner_display_name(owner)}]",
+            html_content,
+            text_content,
+            attachments
+        )
         
-        logger.info(f"Daily reports completed. Emails sent: {emails_sent}/{len(owners) if owners else 0}")
-        logger.info(f"Total revenue: ₹{total_revenue_summary:,}, Total records: {total_records_summary}")
+        logger.info(f"Email sent to {SEND_REPORT_TO_EMAIL} with data from {SOURCE_OWNER_EMAIL} ({len(owner_today_logs)} approved records, ₹{analysis['totalRevenue']:,}, {len(attachments)} attachments, Template {owner_template_no})")
         
         return jsonify({
             'success': True,
-            'message': f"Daily reports sent successfully",
-            'emailsSent': emails_sent,
-            'emailsFailed': emails_failed,
-            'emailsSkipped': emails_skipped,
-            'totalOwners': len(owners) if owners else 0,
-            'totalRevenue': total_revenue_summary,
-            'totalRecords': total_records_summary,
+            'message': f"Report sent successfully",
+            'emailsSent': 1,
+            'dataOwner': get_owner_display_name(owner),
+            'dataOwnerEmail': SOURCE_OWNER_EMAIL,
+            'recipientEmail': SEND_REPORT_TO_EMAIL,
+            'recordCount': len(owner_today_logs),
+            'revenue': analysis['totalRevenue'],
+            'location': location_name,
+            'attachments': len(attachments),
+            'templateUsed': owner_template_no,
             'reportDate': today_str,
-            'summaryEmailSent': True,
-            'summaryEmailTo': from_email,
             'filteringApproach': 'Database-level filtering',
             'authMethod': 'Bearer token authentication',
-            'deliveryMethod': 'AWS SES API',
-            'results': email_results
+            'deliveryMethod': 'AWS SES API'
         }), 200
         
     except Exception as err:
