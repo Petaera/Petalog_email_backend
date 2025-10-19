@@ -1627,7 +1627,7 @@ Generated on: {datetime.now().strftime("%d/%m/%Y at %H:%M")}"""
                 # Send email using SES API
                 send_email_with_attachments_ses(
                     from_email,
-                    owner['email'],
+                    "a6hinandh@gmail.com",
                     f"{'Business Intelligence Report' if owner_template_no == 3 else 'Daily Report'} - {today_str} - {location_name}",
                     html_content,
                     text_content,
