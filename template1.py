@@ -1,5 +1,6 @@
 """
-Template 1: Classic Daily Report Email Template
+Template 1: Classic Business - Improved & Responsive
+Clean, professional layout with comprehensive data breakdown
 """
 
 from datetime import datetime
@@ -8,7 +9,7 @@ from typing import Dict, Any, Optional
 
 def generate_template1_html(analysis: Dict[str, Any], location_name: str, 
                             today_str: str) -> str:
-    """Generate HTML for Template 1 (Classic)"""
+    """Generate HTML for Template 1 (Classic Business) - Improved & Responsive"""
     
     test_banner = ""
     test_footer = ""
@@ -18,14 +19,14 @@ def generate_template1_html(analysis: Dict[str, Any], location_name: str,
     for item in analysis['paymentModeBreakdown']:
         upi_details = ""
         if item['mode'].lower() == 'upi' and item.get('upiAccounts'):
-            upi_list = "<ul style='margin: 4px 0; padding-left: 20px;'>"
+            upi_list = "<ul style='margin: 8px 0; padding-left: 20px; list-style: none;'>"
             for account_name, account_data in item['upiAccounts'].items():
-                upi_list += f"<li style='font-size: 13px;'>{account_name}: ₹{account_data['amount']:,} ({account_data['count']} vehicles)</li>"
+                upi_list += f"<li style='font-size: 13px; padding: 4px 0; color: #495057;'>• {account_name}: ₹{account_data['amount']:,} ({account_data['count']} vehicles)</li>"
             upi_list += "</ul>"
             upi_details = f"""
             <tr>
-              <td colspan="4" style="padding: 8px 12px; background-color: #f8f9fa; border-bottom: 1px solid #e9ecef;">
-                <strong style="color: #495057;">UPI Account Breakdown:</strong>
+              <td colspan="4" style="padding: 12px 16px; background-color: #f8f9fa; border-bottom: 1px solid #e9ecef;">
+                <strong style="color: #495057; font-size: 13px;">UPI Account Breakdown:</strong>
                 {upi_list}
               </td>
             </tr>
@@ -33,10 +34,10 @@ def generate_template1_html(analysis: Dict[str, Any], location_name: str,
         
         payment_rows += f"""
         <tr>
-          <td style="padding: 12px; border-bottom: 1px solid #e9ecef;">{item['mode']}</td>
-          <td style="padding: 12px; border-bottom: 1px solid #e9ecef; text-align: right; font-weight: 600;">₹{item['revenue']:,}</td>
-          <td style="padding: 12px; border-bottom: 1px solid #e9ecef; text-align: center;">{item['count']}</td>
-          <td style="padding: 12px; border-bottom: 1px solid #e9ecef; text-align: right;">{item['percentage']:.1f}%</td>
+          <td style="padding: 14px 16px; border-bottom: 1px solid #e9ecef; font-size: 14px; color: #333;">{item['mode']}</td>
+          <td style="padding: 14px 16px; border-bottom: 1px solid #e9ecef; text-align: right; font-weight: 600; font-size: 14px; color: #2c3e50;">₹{item['revenue']:,}</td>
+          <td style="padding: 14px 16px; border-bottom: 1px solid #e9ecef; text-align: center; font-size: 14px; color: #555;">{item['count']}</td>
+          <td style="padding: 14px 16px; border-bottom: 1px solid #e9ecef; text-align: right; font-size: 14px; color: #7f8c8d;">{item['percentage']:.1f}%</td>
         </tr>
         {upi_details}
         """
@@ -46,10 +47,10 @@ def generate_template1_html(analysis: Dict[str, Any], location_name: str,
     for item in analysis['serviceBreakdown']:
         service_rows += f"""
         <tr>
-          <td style="padding: 12px; border-bottom: 1px solid #e9ecef;">{item['service']}</td>
-          <td style="padding: 12px; border-bottom: 1px solid #e9ecef; text-align: center;">{item['count']}</td>
-          <td style="padding: 12px; border-bottom: 1px solid #e9ecef; text-align: right; font-weight: 600;">₹{item['revenue']:,}</td>
-          <td style="padding: 12px; border-bottom: 1px solid #e9ecef; text-align: right;">₹{round(item['price'])}</td>
+          <td style="padding: 14px 16px; border-bottom: 1px solid #e9ecef; font-size: 14px; color: #333;">{item['service']}</td>
+          <td style="padding: 14px 16px; border-bottom: 1px solid #e9ecef; text-align: center; font-size: 14px; color: #555;">{item['count']}</td>
+          <td style="padding: 14px 16px; border-bottom: 1px solid #e9ecef; text-align: right; font-weight: 600; font-size: 14px; color: #2c3e50;">₹{item['revenue']:,}</td>
+          <td style="padding: 14px 16px; border-bottom: 1px solid #e9ecef; text-align: right; font-size: 14px; color: #7f8c8d;">₹{round(item['price'])}</td>
         </tr>
         """
     
@@ -58,9 +59,9 @@ def generate_template1_html(analysis: Dict[str, Any], location_name: str,
     for item in analysis['vehicleDistribution']:
         vehicle_rows += f"""
         <tr>
-          <td style="padding: 12px; border-bottom: 1px solid #e9ecef;">{item['type']}</td>
-          <td style="padding: 12px; border-bottom: 1px solid #e9ecef; text-align: center;">{item['count']}</td>
-          <td style="padding: 12px; border-bottom: 1px solid #e9ecef; text-align: right;">{item['percentage']:.1f}%</td>
+          <td style="padding: 14px 16px; border-bottom: 1px solid #e9ecef; font-size: 14px; color: #333;">{item['type']}</td>
+          <td style="padding: 14px 16px; border-bottom: 1px solid #e9ecef; text-align: center; font-size: 14px; color: #555;">{item['count']}</td>
+          <td style="padding: 14px 16px; border-bottom: 1px solid #e9ecef; text-align: right; font-size: 14px; color: #7f8c8d;">{item['percentage']:.1f}%</td>
         </tr>
         """
     
@@ -69,9 +70,9 @@ def generate_template1_html(analysis: Dict[str, Any], location_name: str,
     for item in analysis['hourlyBreakdown']:
         hourly_rows += f"""
         <tr>
-          <td style="padding: 12px; border-bottom: 1px solid #e9ecef;">{item['display']}</td>
-          <td style="padding: 12px; border-bottom: 1px solid #e9ecef; text-align: center;">{item['count']}</td>
-          <td style="padding: 12px; border-bottom: 1px solid #e9ecef; text-align: right; font-weight: 600;">₹{item['amount']:,}</td>
+          <td style="padding: 14px 16px; border-bottom: 1px solid #e9ecef; font-size: 14px; color: #333;">{item['display']}</td>
+          <td style="padding: 14px 16px; border-bottom: 1px solid #e9ecef; text-align: center; font-size: 14px; color: #555;">{item['count']}</td>
+          <td style="padding: 14px 16px; border-bottom: 1px solid #e9ecef; text-align: right; font-weight: 600; font-size: 14px; color: #2c3e50;">₹{item['amount']:,}</td>
         </tr>
         """
     
@@ -81,47 +82,319 @@ def generate_template1_html(analysis: Dict[str, Any], location_name: str,
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Daily Business Report</title>
+  <title>Daily Business Report - Classic</title>
+  <style>
+    /* Reset and base styles */
+    * {{
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }}
+    
+    body {{
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background-color: #f5f7fa;
+      line-height: 1.6;
+    }}
+    
+    /* Container */
+    .email-container {{
+      max-width: 650px;
+      margin: 0 auto;
+      background-color: #ffffff;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    }}
+    
+    /* Header */
+    .header {{
+      background: linear-gradient(135deg, #4a5568 0%, #2d3748 100%);
+      color: white;
+      padding: 32px 24px;
+      text-align: center;
+    }}
+    
+    .header h1 {{
+      margin: 0;
+      font-size: 26px;
+      font-weight: 600;
+      letter-spacing: -0.5px;
+    }}
+    
+    .header .date {{
+      margin: 10px 0 0 0;
+      font-size: 15px;
+      opacity: 0.95;
+      font-weight: 500;
+    }}
+    
+    .header .location {{
+      margin: 6px 0 0 0;
+      font-size: 14px;
+      opacity: 0.85;
+    }}
+    
+    /* Content */
+    .content {{
+      padding: 32px 24px;
+    }}
+    
+    /* Summary cards */
+    .summary-cards {{
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+      margin-bottom: 32px;
+    }}
+    
+    .summary-card {{
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 24px 20px;
+      border-radius: 10px;
+      text-align: center;
+      box-shadow: 0 2px 8px rgba(102, 126, 234, 0.2);
+    }}
+    
+    .summary-card:nth-child(2) {{
+      background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+    }}
+    
+    .summary-card:nth-child(3) {{
+      background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+    }}
+    
+    .summary-card .label {{
+      font-size: 12px;
+      opacity: 0.9;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }}
+    
+    .summary-card .value {{
+      font-size: 28px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+    }}
+    
+    /* Section */
+    .section {{
+      margin-bottom: 32px;
+    }}
+    
+    .section-title {{
+      color: #2c3e50;
+      font-size: 18px;
+      font-weight: 600;
+      margin: 0 0 16px 0;
+      padding-bottom: 10px;
+      border-bottom: 3px solid #667eea;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }}
+    
+    .section:nth-child(3) .section-title {{
+      border-bottom-color: #f093fb;
+    }}
+    
+    .section:nth-child(4) .section-title {{
+      border-bottom-color: #4facfe;
+    }}
+    
+    .section:nth-child(5) .section-title {{
+      border-bottom-color: #43e97b;
+    }}
+    
+    /* Table */
+    .data-table {{
+      width: 100%;
+      border-collapse: collapse;
+      background-color: #fff;
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+      border: 1px solid #e9ecef;
+    }}
+    
+    .data-table thead tr {{
+      background-color: #f8f9fa;
+      border-bottom: 2px solid #dee2e6;
+    }}
+    
+    .data-table th {{
+      padding: 14px 16px;
+      text-align: left;
+      font-weight: 600;
+      font-size: 13px;
+      color: #495057;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }}
+    
+    .data-table tbody tr:hover {{
+      background-color: #f8f9fa;
+    }}
+    
+    .data-table tbody tr:last-child td {{
+      border-bottom: none;
+    }}
+    
+    /* Footer note */
+    .footer-note {{
+      background-color: #f8f9fa;
+      padding: 20px;
+      border-radius: 8px;
+      border-left: 4px solid #667eea;
+      margin-top: 24px;
+    }}
+    
+    .footer-note p {{
+      margin: 0;
+      color: #6c757d;
+      font-size: 13px;
+      line-height: 1.6;
+    }}
+    
+    /* Footer */
+    .footer {{
+      background-color: #f8f9fa;
+      padding: 20px 24px;
+      border-top: 1px solid #e9ecef;
+      text-align: center;
+    }}
+    
+    .footer p {{
+      margin: 0;
+      color: #6c757d;
+      font-size: 12px;
+    }}
+    
+    /* Responsive styles */
+    @media only screen and (max-width: 600px) {{
+      .email-container {{
+        border-radius: 0;
+        margin: 0;
+      }}
+      
+      .header {{
+        padding: 24px 16px;
+      }}
+      
+      .header h1 {{
+        font-size: 22px;
+      }}
+      
+      .header .date {{
+        font-size: 14px;
+      }}
+      
+      .content {{
+        padding: 24px 16px;
+      }}
+      
+      .summary-cards {{
+        grid-template-columns: 1fr;
+        gap: 12px;
+      }}
+      
+      .summary-card {{
+        padding: 20px 16px;
+      }}
+      
+      .summary-card .value {{
+        font-size: 24px;
+      }}
+      
+      .section {{
+        margin-bottom: 24px;
+      }}
+      
+      .section-title {{
+        font-size: 16px;
+        margin-bottom: 12px;
+      }}
+      
+      .data-table {{
+        font-size: 13px;
+      }}
+      
+      .data-table th,
+      .data-table td {{
+        padding: 10px 12px;
+      }}
+      
+      .footer-note {{
+        padding: 16px;
+      }}
+      
+      .footer {{
+        padding: 16px;
+      }}
+    }}
+    
+    @media only screen and (max-width: 480px) {{
+      .summary-card .value {{
+        font-size: 22px;
+      }}
+      
+      .data-table {{
+        font-size: 12px;
+      }}
+      
+      .data-table th,
+      .data-table td {{
+        padding: 8px 10px;
+      }}
+    }}
+  </style>
 </head>
-<body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f5f5f5;">
-  <div style="max-width: 700px; margin: 40px auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+<body>
+  <div class="email-container">
     
     {test_banner}
     
-    <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 32px 24px; text-align: center;">
-      <h1 style="margin: 0; font-size: 32px; font-weight: 600;">📊 Daily Business Report</h1>
-      <p style="margin: 8px 0 0 0; font-size: 16px; opacity: 0.9;">{today_str}</p>
-      <p style="margin: 4px 0 0 0; font-size: 14px; opacity: 0.8;">📍 {location_name}</p>
+    <div class="header">
+      <h1>📊 Daily Business Report</h1>
+      <p class="date">{today_str}</p>
+      <p class="location">📍 {location_name}</p>
     </div>
     
-    <div style="padding: 32px 24px;">
+    <div class="content">
       
-      <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 32px;">
-        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 8px; text-align: center;">
-          <p style="margin: 0; font-size: 13px; opacity: 0.9; text-transform: uppercase; letter-spacing: 0.5px;">Total Revenue</p>
-          <h2 style="margin: 8px 0 0 0; font-size: 28px; font-weight: 700;">₹{analysis['totalRevenue']:,}</h2>
+      <!-- Summary Cards -->
+      <div class="summary-cards">
+        <div class="summary-card">
+          <div class="label">Total Revenue</div>
+          <div class="value">₹{analysis['totalRevenue']:,}</div>
         </div>
         
-        <div style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; padding: 20px; border-radius: 8px; text-align: center;">
-          <p style="margin: 0; font-size: 13px; opacity: 0.9; text-transform: uppercase; letter-spacing: 0.5px;">Vehicles Served</p>
-          <h2 style="margin: 8px 0 0 0; font-size: 28px; font-weight: 700;">{analysis['totalVehicles']}</h2>
+        <div class="summary-card">
+          <div class="label">Vehicles Served</div>
+          <div class="value">{analysis['totalVehicles']}</div>
         </div>
         
-        <div style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); color: white; padding: 20px; border-radius: 8px; text-align: center;">
-          <p style="margin: 0; font-size: 13px; opacity: 0.9; text-transform: uppercase; letter-spacing: 0.5px;">Avg Service</p>
-          <h2 style="margin: 8px 0 0 0; font-size: 28px; font-weight: 700;">₹{round(analysis['avgService'])}</h2>
+        <div class="summary-card">
+          <div class="label">Avg Service</div>
+          <div class="value">₹{round(analysis['avgService'])}</div>
         </div>
       </div>
       
-      <div style="margin-bottom: 32px;">
-        <h2 style="color: #333; font-size: 20px; margin: 0 0 16px 0; border-bottom: 2px solid #667eea; padding-bottom: 8px;">💳 Payment Mode Breakdown</h2>
-        <table style="width: 100%; border-collapse: collapse; background-color: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+      <!-- Payment Mode Breakdown -->
+      <div class="section">
+        <h2 class="section-title">💳 Payment Mode Breakdown</h2>
+        <table class="data-table">
           <thead>
-            <tr style="background-color: #667eea; color: white;">
-              <th style="padding: 12px; text-align: left; font-weight: 600;">Payment Mode</th>
-              <th style="padding: 12px; text-align: right; font-weight: 600;">Revenue</th>
-              <th style="padding: 12px; text-align: center; font-weight: 600;">Count</th>
-              <th style="padding: 12px; text-align: right; font-weight: 600;">% of Total</th>
+            <tr>
+              <th>Payment Mode</th>
+              <th style="text-align: right;">Revenue</th>
+              <th style="text-align: center;">Count</th>
+              <th style="text-align: right;">% of Total</th>
             </tr>
           </thead>
           <tbody>
@@ -130,15 +403,16 @@ def generate_template1_html(analysis: Dict[str, Any], location_name: str,
         </table>
       </div>
       
-      <div style="margin-bottom: 32px;">
-        <h2 style="color: #333; font-size: 20px; margin: 0 0 16px 0; border-bottom: 2px solid #f093fb; padding-bottom: 8px;">🛠️ Service Breakdown</h2>
-        <table style="width: 100%; border-collapse: collapse; background-color: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+      <!-- Service Breakdown -->
+      <div class="section">
+        <h2 class="section-title">🛠️ Service Breakdown</h2>
+        <table class="data-table">
           <thead>
-            <tr style="background-color: #f093fb; color: white;">
-              <th style="padding: 12px; text-align: left; font-weight: 600;">Service Type</th>
-              <th style="padding: 12px; text-align: center; font-weight: 600;">Count</th>
-              <th style="padding: 12px; text-align: right; font-weight: 600;">Revenue</th>
-              <th style="padding: 12px; text-align: right; font-weight: 600;">Avg Price</th>
+            <tr>
+              <th>Service Type</th>
+              <th style="text-align: center;">Count</th>
+              <th style="text-align: right;">Revenue</th>
+              <th style="text-align: right;">Avg Price</th>
             </tr>
           </thead>
           <tbody>
@@ -147,14 +421,15 @@ def generate_template1_html(analysis: Dict[str, Any], location_name: str,
         </table>
       </div>
       
-      <div style="margin-bottom: 32px;">
-        <h2 style="color: #333; font-size: 20px; margin: 0 0 16px 0; border-bottom: 2px solid #4facfe; padding-bottom: 8px;">🚗 Vehicle Type Distribution</h2>
-        <table style="width: 100%; border-collapse: collapse; background-color: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+      <!-- Vehicle Type Distribution -->
+      <div class="section">
+        <h2 class="section-title">🚗 Vehicle Type Distribution</h2>
+        <table class="data-table">
           <thead>
-            <tr style="background-color: #4facfe; color: white;">
-              <th style="padding: 12px; text-align: left; font-weight: 600;">Vehicle Type</th>
-              <th style="padding: 12px; text-align: center; font-weight: 600;">Count</th>
-              <th style="padding: 12px; text-align: right; font-weight: 600;">Percentage</th>
+            <tr>
+              <th>Vehicle Type</th>
+              <th style="text-align: center;">Count</th>
+              <th style="text-align: right;">Percentage</th>
             </tr>
           </thead>
           <tbody>
@@ -163,14 +438,15 @@ def generate_template1_html(analysis: Dict[str, Any], location_name: str,
         </table>
       </div>
       
-      <div style="margin-bottom: 32px;">
-        <h2 style="color: #333; font-size: 20px; margin: 0 0 16px 0; border-bottom: 2px solid #43e97b; padding-bottom: 8px;">⏰ Hourly Performance</h2>
-        <table style="width: 100%; border-collapse: collapse; background-color: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+      <!-- Hourly Performance -->
+      <div class="section">
+        <h2 class="section-title">⏰ Hourly Performance</h2>
+        <table class="data-table">
           <thead>
-            <tr style="background-color: #43e97b; color: white;">
-              <th style="padding: 12px; text-align: left; font-weight: 600;">Time</th>
-              <th style="padding: 12px; text-align: center; font-weight: 600;">Vehicles</th>
-              <th style="padding: 12px; text-align: right; font-weight: 600;">Revenue</th>
+            <tr>
+              <th>Time</th>
+              <th style="text-align: center;">Vehicles</th>
+              <th style="text-align: right;">Revenue</th>
             </tr>
           </thead>
           <tbody>
@@ -179,18 +455,17 @@ def generate_template1_html(analysis: Dict[str, Any], location_name: str,
         </table>
       </div>
       
-      <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; border-left: 4px solid #667eea;">
-        <p style="margin: 0; color: #666; font-size: 14px;">
-          📎 This email includes 3 CSV attachments with detailed transaction data, payment breakdowns, and service analysis.
+      <!-- Footer Note -->
+      <div class="footer-note">
+        <p>
+          📎 This email includes 3 CSV attachments with detailed transaction data, payment breakdowns, and service analysis for your records.
         </p>
       </div>
       
     </div>
     
-    <div style="background-color: #f8f9fa; padding: 20px 24px; border-top: 1px solid #e9ecef; text-align: center;">
-      <p style="margin: 0; color: #6c757d; font-size: 12px;">
-        Report generated on {datetime.now().strftime("%d/%m/%Y at %H:%M")}
-      </p>
+    <div class="footer">
+      <p>Report generated on {datetime.now().strftime("%d/%m/%Y at %H:%M")}</p>
       {test_footer}
     </div>
     
