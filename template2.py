@@ -1,19 +1,18 @@
 """
-Template 2: Modern Analytics - Chart-focused design with interactive visual elements
+Template 2: Modern Analytics - Chart-focused design with CID image attachments
 Uses matplotlib to generate actual pie charts and bar graphs
 """
 
 from datetime import datetime
-from typing import Dict, Any
+from typing import Dict, Any, Tuple
 import matplotlib
 matplotlib.use('Agg')  # Non-interactive backend
 import matplotlib.pyplot as plt
 import io
-import base64
 
 
-def generate_pie_chart(data: list, title: str) -> str:
-    """Generate a pie chart and return as base64 string"""
+def generate_pie_chart(data: list, title: str) -> bytes:
+    """Generate a pie chart and return as bytes"""
     fig, ax = plt.subplots(figsize=(6, 6), facecolor='white')
     
     labels = [item['mode'] if 'mode' in item else item.get('service', item.get('type', '')) for item in data]
@@ -35,17 +34,17 @@ def generate_pie_chart(data: list, title: str) -> str:
     ax.set_title(title, fontsize=14, weight='bold', pad=20, color='#2c3e50')
     plt.tight_layout()
     
-    # Convert to base64
+    # Convert to bytes
     buffer = io.BytesIO()
     plt.savefig(buffer, format='png', dpi=150, bbox_inches='tight', facecolor='white')
     buffer.seek(0)
-    image_base64 = base64.b64encode(buffer.read()).decode()
+    image_bytes = buffer.read()
     plt.close(fig)
     
-    return f"data:image/png;base64,{image_base64}"
+    return image_bytes
 
 
-def generate_bar_chart(hourly_data: list) -> str:
+def generate_bar_chart(hourly_data: list) -> bytes:
     """Generate a bar chart for hourly performance"""
     fig, ax = plt.subplots(figsize=(12, 5), facecolor='white')
     
@@ -80,17 +79,17 @@ def generate_bar_chart(hourly_data: list) -> str:
     
     plt.tight_layout()
     
-    # Convert to base64
+    # Convert to bytes
     buffer = io.BytesIO()
     plt.savefig(buffer, format='png', dpi=150, bbox_inches='tight', facecolor='white')
     buffer.seek(0)
-    image_base64 = base64.b64encode(buffer.read()).decode()
+    image_bytes = buffer.read()
     plt.close(fig)
     
-    return f"data:image/png;base64,{image_base64}"
+    return image_bytes
 
 
-def generate_horizontal_bar_chart(service_data: list) -> str:
+def generate_horizontal_bar_chart(service_data: list) -> bytes:
     """Generate horizontal bar chart for service breakdown"""
     fig, ax = plt.subplots(figsize=(10, 6), facecolor='white')
     
@@ -118,28 +117,38 @@ def generate_horizontal_bar_chart(service_data: list) -> str:
     
     plt.tight_layout()
     
-    # Convert to base64
+    # Convert to bytes
     buffer = io.BytesIO()
     plt.savefig(buffer, format='png', dpi=150, bbox_inches='tight', facecolor='white')
     buffer.seek(0)
-    image_base64 = base64.b64encode(buffer.read()).decode()
+    image_bytes = buffer.read()
     plt.close(fig)
     
-    return f"data:image/png;base64,{image_base64}"
+    return image_bytes
 
 
-def generate_template2_html(analysis: Dict[str, Any], location_name: str, 
-                            today_str: str) -> str:
-    """Generate HTML for Template 2 (Modern Analytics) with actual charts"""
+def generate_template2_html_with_cid(analysis: Dict[str, Any], location_name: str, 
+                                     today_str: str) -> Tuple[str, Dict[str, bytes]]:
+    """
+    Generate HTML for Template 2 with CID references and return chart data separately
     
-    test_banner = ""
-    test_footer = ""
+    Returns:
+        Tuple[str, Dict[str, bytes]]: (HTML content, dictionary of {cid: image_bytes})
+    """
     
-    # Generate charts
-    payment_pie = generate_pie_chart(analysis['paymentModeBreakdown'], 'Payment Mode Distribution')
-    vehicle_pie = generate_pie_chart(analysis['vehicleDistribution'], 'Vehicle Type Distribution')
-    hourly_bar = generate_bar_chart(analysis['hourlyBreakdown'])
-    service_bar = generate_horizontal_bar_chart(analysis['serviceBreakdown'])
+    # Generate charts as bytes
+    payment_pie_bytes = generate_pie_chart(analysis['paymentModeBreakdown'], 'Payment Mode Distribution')
+    vehicle_pie_bytes = generate_pie_chart(analysis['vehicleDistribution'], 'Vehicle Type Distribution')
+    hourly_bar_bytes = generate_bar_chart(analysis['hourlyBreakdown'])
+    service_bar_bytes = generate_horizontal_bar_chart(analysis['serviceBreakdown'])
+    
+    # Create CID mapping
+    chart_images = {
+        'payment_pie': payment_pie_bytes,
+        'vehicle_pie': vehicle_pie_bytes,
+        'hourly_bar': hourly_bar_bytes,
+        'service_bar': service_bar_bytes
+    }
     
     # Payment breakdown cards with enhanced stats
     payment_cards = ""
@@ -157,19 +166,19 @@ def generate_template2_html(analysis: Dict[str, Any], location_name: str,
             upi_details = f'<div style="margin-top: 14px; padding-top: 14px; border-top: 1px solid #e0e0e0;"><strong style="color: #555; font-size: 13px;">UPI Account Details:</strong>{upi_items}</div>'
         
         payment_cards += f"""
-        <div style="background: white; padding: 22px; border-radius: 10px; box-shadow: 0 3px 10px rgba(0,0,0,0.08); border-left: 5px solid #667eea; transition: transform 0.2s;">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
-            <h3 style="margin: 0; color: #2c3e50; font-size: 17px; font-weight: 700;">{item['mode']}</h3>
-            <span style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 5px 14px; border-radius: 15px; font-size: 12px; font-weight: 700; box-shadow: 0 2px 6px rgba(102, 126, 234, 0.3);">{item['percentage']:.1f}%</span>
+        <div style="background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); border-left: 4px solid #667eea;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <h3 style="margin: 0; color: #2c3e50; font-size: 16px; font-weight: 700;">{item['mode']}</h3>
+            <span style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 4px 12px; border-radius: 12px; font-size: 11px; font-weight: 700;">{item['percentage']:.1f}%</span>
           </div>
           <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
             <div>
-              <span style="color: #95a5a6; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;">Revenue</span><br>
-              <strong style="color: #2c3e50; font-size: 22px; font-weight: 700;">₹{item['revenue']:,}</strong>
+              <span style="color: #95a5a6; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;">Revenue</span><br>
+              <strong style="color: #2c3e50; font-size: 20px; font-weight: 700;">₹{item['revenue']:,}</strong>
             </div>
             <div style="text-align: right;">
-              <span style="color: #95a5a6; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;">Count</span><br>
-              <strong style="color: #2c3e50; font-size: 22px; font-weight: 700;">{item['count']}</strong>
+              <span style="color: #95a5a6; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;">Count</span><br>
+              <strong style="color: #2c3e50; font-size: 20px; font-weight: 700;">{item['count']}</strong>
             </div>
           </div>
           {upi_details}
@@ -179,36 +188,29 @@ def generate_template2_html(analysis: Dict[str, Any], location_name: str,
     # Service statistics cards
     service_cards = ""
     for i, item in enumerate(analysis['serviceBreakdown'][:6]):  # Top 6 services
-        gradient_colors = [
-            'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-            'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)',
-            'linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)',
-            'linear-gradient(135deg, #43e97b 0%, #38f9d7 100%)',
-            'linear-gradient(135deg, #fa709a 0%, #fee140 100%)',
-            'linear-gradient(135deg, #30cfd0 0%, #330867 100%)'
-        ]
+        border_colors = ['#667eea', '#f093fb', '#4facfe', '#43e97b', '#fa709a', '#30cfd0']
         
         service_cards += f"""
-        <div style="background: white; padding: 22px; border-radius: 10px; box-shadow: 0 3px 10px rgba(0,0,0,0.08); border-top: 4px solid; border-image: {gradient_colors[i % 6]} 1;">
-          <h3 style="margin: 0 0 14px 0; color: #2c3e50; font-size: 16px; font-weight: 700;">{item['service']}</h3>
-          <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px;">
+        <div style="background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); border-top: 4px solid {border_colors[i % 6]};">
+          <h3 style="margin: 0 0 12px 0; color: #2c3e50; font-size: 15px; font-weight: 700;">{item['service']}</h3>
+          <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;">
             <div>
-              <span style="color: #95a5a6; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;">Count</span><br>
-              <strong style="color: #2c3e50; font-size: 20px; font-weight: 700;">{item['count']}</strong>
+              <span style="color: #95a5a6; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;">Count</span><br>
+              <strong style="color: #2c3e50; font-size: 18px; font-weight: 700;">{item['count']}</strong>
             </div>
             <div>
-              <span style="color: #95a5a6; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;">Revenue</span><br>
-              <strong style="color: #2c3e50; font-size: 20px; font-weight: 700;">₹{item['revenue']:,}</strong>
+              <span style="color: #95a5a6; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;">Revenue</span><br>
+              <strong style="color: #2c3e50; font-size: 18px; font-weight: 700;">₹{item['revenue']:,}</strong>
             </div>
             <div>
-              <span style="color: #95a5a6; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;">Avg</span><br>
-              <strong style="color: #2c3e50; font-size: 20px; font-weight: 700;">₹{round(item['price'])}</strong>
+              <span style="color: #95a5a6; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;">Avg</span><br>
+              <strong style="color: #2c3e50; font-size: 18px; font-weight: 700;">₹{round(item['price'])}</strong>
             </div>
           </div>
         </div>
         """
     
-    return f"""
+    html_content = f"""
 <!DOCTYPE html>
 <html>
 <head>
@@ -224,8 +226,8 @@ def generate_template2_html(analysis: Dict[str, Any], location_name: str,
     
     body {{
       margin: 0;
-      padding: 0;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      padding: 20px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
       background-color: #f0f4f8;
       line-height: 1.6;
     }}
@@ -234,139 +236,102 @@ def generate_template2_html(analysis: Dict[str, Any], location_name: str,
       max-width: 900px;
       margin: 0 auto;
       background-color: #ffffff;
-      border-radius: 16px;
+      border-radius: 14px;
       overflow: hidden;
-      box-shadow: 0 10px 40px rgba(0,0,0,0.12);
+      box-shadow: 0 8px 30px rgba(0,0,0,0.1);
     }}
     
     .header {{
       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       color: white;
-      padding: 48px 32px;
+      padding: 40px 28px;
       text-align: center;
-      position: relative;
-      overflow: hidden;
-    }}
-    
-    .header::before {{
-      content: '';
-      position: absolute;
-      top: -50%;
-      left: -50%;
-      width: 200%;
-      height: 200%;
-      background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 70%);
     }}
     
     .header h1 {{
       margin: 0;
-      font-size: 38px;
+      font-size: 34px;
       font-weight: 800;
       letter-spacing: -0.5px;
-      position: relative;
-      z-index: 1;
     }}
     
     .header .date {{
-      margin: 14px 0 0 0;
-      font-size: 18px;
+      margin: 10px 0 0 0;
+      font-size: 16px;
       opacity: 0.95;
       font-weight: 600;
-      position: relative;
-      z-index: 1;
     }}
     
     .header .location {{
-      margin: 6px 0 0 0;
-      font-size: 15px;
+      margin: 4px 0 0 0;
+      font-size: 14px;
       opacity: 0.85;
-      position: relative;
-      z-index: 1;
     }}
     
     .content {{
-      padding: 40px 32px;
+      padding: 36px 28px;
     }}
     
     .stats-grid {{
       display: grid;
       grid-template-columns: repeat(3, 1fr);
-      gap: 20px;
-      margin-bottom: 48px;
+      gap: 16px;
+      margin-bottom: 40px;
     }}
     
     .stat-card {{
-      padding: 28px 24px;
-      border-radius: 14px;
+      padding: 24px 20px;
+      border-radius: 12px;
       text-align: center;
-      box-shadow: 0 6px 20px rgba(0,0,0,0.12);
-      position: relative;
-      overflow: hidden;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.1);
+      color: white;
     }}
     
-    .stat-card::before {{
-      content: '';
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      opacity: 0.95;
-    }}
-    
-    .stat-card:nth-child(1)::before {{
+    .stat-card:nth-child(1) {{
       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     }}
     
-    .stat-card:nth-child(2)::before {{
+    .stat-card:nth-child(2) {{
       background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
     }}
     
-    .stat-card:nth-child(3)::before {{
+    .stat-card:nth-child(3) {{
       background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
     }}
     
     .stat-card .label {{
-      font-size: 12px;
+      font-size: 11px;
       text-transform: uppercase;
-      letter-spacing: 1.2px;
+      letter-spacing: 1px;
       font-weight: 700;
-      margin-bottom: 10px;
+      margin-bottom: 8px;
       opacity: 0.9;
-      position: relative;
-      color: white;
     }}
     
     .stat-card .value {{
-      font-size: 34px;
+      font-size: 30px;
       font-weight: 800;
       letter-spacing: -1px;
-      position: relative;
-      color: white;
     }}
     
     .section {{
-      margin-bottom: 48px;
+      margin-bottom: 40px;
     }}
     
     .section-title {{
       color: #2c3e50;
-      font-size: 26px;
+      font-size: 22px;
       font-weight: 800;
-      margin: 0 0 24px 0;
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      letter-spacing: -0.5px;
+      margin: 0 0 20px 0;
+      letter-spacing: -0.3px;
     }}
     
     .chart-container {{
       background: white;
-      padding: 32px;
-      border-radius: 14px;
-      box-shadow: 0 4px 16px rgba(0,0,0,0.08);
-      margin-bottom: 28px;
-      border: 1px solid #e8edf2;
+      padding: 28px;
+      border-radius: 12px;
+      box-shadow: 0 3px 12px rgba(0,0,0,0.08);
+      margin-bottom: 24px;
     }}
     
     .chart-container img {{
@@ -378,37 +343,35 @@ def generate_template2_html(analysis: Dict[str, Any], location_name: str,
     .cards-grid {{
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-      gap: 20px;
+      gap: 16px;
     }}
     
     .footer-banner {{
       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       color: white;
-      padding: 28px;
-      border-radius: 14px;
+      padding: 24px;
+      border-radius: 12px;
       text-align: center;
-      box-shadow: 0 6px 20px rgba(102, 126, 234, 0.3);
-      margin-top: 48px;
+      margin-top: 40px;
     }}
     
     .footer-banner p {{
       margin: 0;
-      font-size: 15px;
-      line-height: 1.7;
+      font-size: 14px;
+      line-height: 1.6;
       font-weight: 500;
     }}
     
     .footer {{
       background-color: #f8f9fa;
-      padding: 28px 32px;
-      border-top: 1px solid #e8edf2;
+      padding: 24px 28px;
       text-align: center;
     }}
     
     .footer p {{
       margin: 0;
       color: #6c757d;
-      font-size: 13px;
+      font-size: 12px;
       font-weight: 500;
     }}
     
@@ -419,11 +382,11 @@ def generate_template2_html(analysis: Dict[str, Any], location_name: str,
       }}
       
       .header {{
-        padding: 36px 20px;
+        padding: 32px 20px;
       }}
       
       .header h1 {{
-        font-size: 28px;
+        font-size: 26px;
       }}
       
       .content {{
@@ -432,29 +395,11 @@ def generate_template2_html(analysis: Dict[str, Any], location_name: str,
       
       .stats-grid {{
         grid-template-columns: 1fr;
-        gap: 16px;
+        gap: 12px;
       }}
       
       .cards-grid {{
         grid-template-columns: 1fr;
-      }}
-      
-      .section-title {{
-        font-size: 22px;
-      }}
-      
-      .chart-container {{
-        padding: 20px;
-      }}
-    }}
-    
-    @media only screen and (max-width: 480px) {{
-      .header h1 {{
-        font-size: 24px;
-      }}
-      
-      .stat-card .value {{
-        font-size: 28px;
       }}
       
       .section-title {{
@@ -465,8 +410,6 @@ def generate_template2_html(analysis: Dict[str, Any], location_name: str,
 </head>
 <body>
   <div class="container">
-    
-    {test_banner}
     
     <div class="header">
       <h1>📊 Business Analytics Report</h1>
@@ -498,7 +441,7 @@ def generate_template2_html(analysis: Dict[str, Any], location_name: str,
       <div class="section">
         <h2 class="section-title">💳 Payment Distribution Analysis</h2>
         <div class="chart-container">
-          <img src="{payment_pie}" alt="Payment Mode Distribution">
+          <img src="cid:payment_pie" alt="Payment Mode Distribution">
         </div>
         <div class="cards-grid">
           {payment_cards}
@@ -509,7 +452,7 @@ def generate_template2_html(analysis: Dict[str, Any], location_name: str,
       <div class="section">
         <h2 class="section-title">🛠️ Service Performance Metrics</h2>
         <div class="chart-container">
-          <img src="{service_bar}" alt="Service Revenue Analysis">
+          <img src="cid:service_bar" alt="Service Revenue Analysis">
         </div>
         <div class="cards-grid">
           {service_cards}
@@ -520,7 +463,7 @@ def generate_template2_html(analysis: Dict[str, Any], location_name: str,
       <div class="section">
         <h2 class="section-title">🚗 Vehicle Type Distribution</h2>
         <div class="chart-container">
-          <img src="{vehicle_pie}" alt="Vehicle Type Distribution">
+          <img src="cid:vehicle_pie" alt="Vehicle Type Distribution">
         </div>
       </div>
       
@@ -528,14 +471,14 @@ def generate_template2_html(analysis: Dict[str, Any], location_name: str,
       <div class="section">
         <h2 class="section-title">⏰ Hourly Performance Trends</h2>
         <div class="chart-container">
-          <img src="{hourly_bar}" alt="Hourly Performance Analysis">
+          <img src="cid:hourly_bar" alt="Hourly Performance Analysis">
         </div>
       </div>
       
       <!-- Footer Banner -->
       <div class="footer-banner">
         <p>
-          📎 <strong>Comprehensive Data Package:</strong> This report includes 3 detailed CSV attachments with complete transaction data, advanced payment analytics, and in-depth service performance metrics for further analysis.
+          🔎 <strong>Comprehensive Data Package:</strong> This report includes 3 detailed CSV attachments with complete transaction data, advanced payment analytics, and in-depth service performance metrics for further analysis.
         </p>
       </div>
       
@@ -543,10 +486,60 @@ def generate_template2_html(analysis: Dict[str, Any], location_name: str,
     
     <div class="footer">
       <p>Advanced Analytics Report Generated on {datetime.now().strftime("%d/%m/%Y at %H:%M")}</p>
-      {test_footer}
     </div>
     
   </div>
 </body>
 </html>
-    """.strip()
+    """
+    
+    return html_content.strip(), chart_images
+
+
+# Example usage function
+def example_usage():
+    """
+    Example showing how to use the CID-based template
+    
+    When sending email, you would:
+    1. Call generate_template2_html_with_cid() to get HTML and image data
+    2. Create MIME multipart message
+    3. Attach images with Content-ID headers
+    4. HTML references images via cid: URLs
+    """
+    
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+    from email.mime.image import MIMEImage
+    
+    # Your analysis data here
+    analysis = {...}  # Your actual analysis dictionary
+    location_name = "Downtown Center"
+    today_str = "19/10/2025"
+    
+    # Generate HTML and get chart images
+    html_content, chart_images = generate_template2_html_with_cid(
+        analysis, location_name, today_str
+    )
+    
+    # Create message
+    msg = MIMEMultipart('related')
+    msg['Subject'] = 'Business Analytics Report'
+    msg['From'] = 'sender@example.com'
+    msg['To'] = 'recipient@example.com'
+    
+    # Attach HTML
+    html_part = MIMEText(html_content, 'html')
+    msg.attach(html_part)
+    
+    # Attach images with CID
+    for cid, image_bytes in chart_images.items():
+        img = MIMEImage(image_bytes)
+        img.add_header('Content-ID', f'<{cid}>')
+        img.add_header('Content-Disposition', 'inline', filename=f'{cid}.png')
+        msg.attach(img)
+    
+    # Now send msg via your SMTP server
+    # smtp.send_message(msg)
+    
+    return msg
