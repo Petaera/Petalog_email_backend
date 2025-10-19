@@ -36,8 +36,8 @@ app = Flask(__name__)
 # ============================================================================
 # HARDCODE THESE EMAIL ADDRESSES
 # ============================================================================
-SOURCE_OWNER_EMAIL = "owner@example.com"  # Email of the owner whose data to fetch
-SEND_REPORT_TO_EMAIL = "recipient@example.com"  # Email where the report should be sent
+SOURCE_OWNER_EMAIL = "joswinmjlm10@gmail.com"  # Email of the owner whose data to fetch
+SEND_REPORT_TO_EMAIL = "a6hinandh@gmail.com"  # Email where the report should be sent
 # ============================================================================
 
 # CONFIGURATION VARIABLES
