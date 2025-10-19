@@ -1531,7 +1531,7 @@ def send_reports():
             
             # Send no-data email if no logs
             if len(owner_today_logs) == 0:
-                logger.info(f"Sending no-data notification to {owner['email']} for {location_name}")
+                logger.info(f"Sending no-data notification to admin inbox (a6hinandh@gmail.com) for {location_name}")
                 try:
                     no_data_html = generate_no_data_email_html(location_name, today_str, None)
                     no_data_text = f"""No Data Report - {today_str}
@@ -1551,10 +1551,10 @@ Generated on: {datetime.now().strftime("%d/%m/%Y at %H:%M")}"""
                     )
                     
                     emails_sent += 1
-                    logger.info(f"No-data email sent to {owner['email']}")
+                    logger.info(f"No-data email sent to admin inbox (a6hinandh@gmail.com)")
                     email_results.append({
                         'owner': get_owner_display_name(owner),
-                        'email': owner['email'],
+                        'email': "a6hinandh@gmail.com",
                         'status': 'success',
                         'recordCount': 0,
                         'revenue': 0,
