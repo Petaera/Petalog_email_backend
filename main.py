@@ -1543,7 +1543,7 @@ Generated on: {datetime.now().strftime("%d/%m/%Y at %H:%M")}"""
                     
                     send_email_with_attachments_ses(
                         from_email,
-                        owner['email'],
+                        "a6hinandh@gmail.com",
                         f"No Data Today - {today_str} - {location_name}",
                         no_data_html,
                         no_data_text,
