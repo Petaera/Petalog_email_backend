@@ -1,681 +1,218 @@
 """
-Template 3: Business Intelligence - Premium design with CID image attachments
-Professional BI-style layout with sophisticated data presentation
+Template 3: Modern Business Intelligence Report with Chart.js
+Clean BI-style layout with data visualizations
 """
 
 from datetime import datetime
-from typing import Dict, Any, Tuple
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
-import numpy as np
-import io
+from typing import Dict, Any
+import json
 
 
-def generate_gradient_bar_chart(hourly_data: list) -> bytes:
-    """Generate sophisticated gradient bar chart for BI report"""
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 8), facecolor='white', 
-                                     gridspec_kw={'height_ratios': [3, 1]})
+def generate_template3_html(analysis: Dict[str, Any], location_name: str, 
+                            today_str: str) -> str:
+    """Generate HTML for Template 3 (BI-Style with Charts)"""
     
-    hours = [item['display'] for item in hourly_data]
-    revenues = [item['amount'] for item in hourly_data]
-    counts = [item['count'] for item in hourly_data]
-    
-    x = np.arange(len(hours))
-    
-    # Main chart - Revenue with gradient
-    colors = plt.cm.viridis(np.linspace(0.3, 0.9, len(revenues)))
-    bars = ax1.bar(x, revenues, color=colors, alpha=0.85, edgecolor='#2c3e50', linewidth=2)
-    
-    # Highlight peak hour
-    max_idx = revenues.index(max(revenues))
-    bars[max_idx].set_color('#43e97b')
-    bars[max_idx].set_edgecolor('#2ecc71')
-    bars[max_idx].set_linewidth(3)
-    
-    ax1.set_ylabel('Revenue (₹)', fontsize=13, weight='bold', color='#2c3e50')
-    ax1.set_title('Hourly Revenue Performance Analysis', fontsize=16, weight='bold', 
-                  pad=20, color='#2c3e50')
-    ax1.grid(axis='y', alpha=0.3, linestyle='--', linewidth=1)
-    ax1.spines['top'].set_visible(False)
-    ax1.spines['right'].set_visible(False)
-    ax1.spines['left'].set_color('#95a5a6')
-    ax1.spines['bottom'].set_color('#95a5a6')
-    
-    # Add value labels on bars
-    for i, (bar, revenue) in enumerate(zip(bars, revenues)):
-        height = bar.get_height()
-        label_color = '#43e97b' if i == max_idx else '#2c3e50'
-        ax1.text(bar.get_x() + bar.get_width()/2., height,
-                f'₹{revenue:,}',
-                ha='center', va='bottom', fontsize=8, weight='bold',
-                color=label_color, rotation=0)
-    
-    # Secondary chart - Vehicle count
-    ax2.plot(x, counts, color='#667eea', linewidth=3, marker='o', 
-             markersize=8, markerfacecolor='#764ba2', markeredgecolor='white',
-             markeredgewidth=2, label='Vehicle Count')
-    ax2.fill_between(x, counts, alpha=0.3, color='#667eea')
-    
-    ax2.set_xlabel('Time of Day', fontsize=12, weight='bold', color='#2c3e50')
-    ax2.set_ylabel('Vehicles', fontsize=11, weight='bold', color='#667eea')
-    ax2.set_xticks(x)
-    ax2.set_xticklabels(hours, rotation=45, ha='right', fontsize=9)
-    ax2.grid(axis='y', alpha=0.2, linestyle='--')
-    ax2.legend(loc='upper right', framealpha=0.9)
-    ax2.spines['top'].set_visible(False)
-    ax2.spines['right'].set_visible(False)
-    
-    plt.tight_layout()
-    
-    buffer = io.BytesIO()
-    plt.savefig(buffer, format='png', dpi=150, bbox_inches='tight', facecolor='white')
-    buffer.seek(0)
-    image_bytes = buffer.read()
-    plt.close(fig)
-    
-    return image_bytes
-
-
-def generate_multi_metric_chart(analysis: Dict[str, Any]) -> bytes:
-    """Generate multi-metric comparison chart"""
-    fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(12, 10), facecolor='white')
-    
-    # Payment Mode Distribution (Donut)
-    payment_data = analysis['paymentModeBreakdown']
-    payment_labels = [item['mode'] for item in payment_data]
-    payment_sizes = [item['revenue'] for item in payment_data]
-    colors1 = ['#667eea', '#f093fb', '#4facfe', '#43e97b', '#fa709a']
-    
-    wedges, texts, autotexts = ax1.pie(payment_sizes, labels=payment_labels, autopct='%1.1f%%',
-                                         colors=colors1[:len(payment_sizes)], startangle=90,
-                                         pctdistance=0.85, explode=[0.05]*len(payment_sizes))
-    centre_circle = plt.Circle((0, 0), 0.70, fc='white')
-    ax1.add_artist(centre_circle)
-    ax1.set_title('Payment Distribution', fontsize=12, weight='bold', pad=15, color='#2c3e50')
-    
-    for autotext in autotexts:
-        autotext.set_color('white')
-        autotext.set_fontsize(9)
-        autotext.set_weight('bold')
-    
-    # Service Revenue (Top 5)
-    service_data = analysis['serviceBreakdown'][:5]
-    service_names = [item['service'] for item in service_data]
-    service_revenues = [item['revenue'] for item in service_data]
-    colors2 = plt.cm.plasma(np.linspace(0.2, 0.8, len(service_names)))
-    
-    bars = ax2.barh(service_names, service_revenues, color=colors2, alpha=0.85,
-                     edgecolor='#2c3e50', linewidth=1.5)
-    ax2.set_xlabel('Revenue (₹)', fontsize=10, weight='bold', color='#2c3e50')
-    ax2.set_title('Top Service Revenue', fontsize=12, weight='bold', pad=15, color='#2c3e50')
-    ax2.grid(axis='x', alpha=0.3, linestyle='--')
-    ax2.spines['top'].set_visible(False)
-    ax2.spines['right'].set_visible(False)
-    
-    for bar, revenue in zip(bars, service_revenues):
-        width = bar.get_width()
-        ax2.text(width, bar.get_y() + bar.get_height()/2,
-                f' ₹{revenue:,}', ha='left', va='center',
-                fontsize=8, weight='bold', color='#2c3e50')
-    
-    # Vehicle Distribution (Pie)
-    vehicle_data = analysis['vehicleDistribution']
-    vehicle_types = [item['type'] for item in vehicle_data]
-    vehicle_counts = [item['count'] for item in vehicle_data]
-    colors3 = ['#4facfe', '#00f2fe', '#667eea', '#764ba2', '#f093fb']
-    
-    wedges, texts, autotexts = ax3.pie(vehicle_counts, labels=vehicle_types, autopct='%1.1f%%',
-                                         colors=colors3[:len(vehicle_counts)], startangle=45,
-                                         explode=[0.03]*len(vehicle_counts), shadow=True)
-    ax3.set_title('Vehicle Type Mix', fontsize=12, weight='bold', pad=15, color='#2c3e50')
-    
-    for autotext in autotexts:
-        autotext.set_color('white')
-        autotext.set_fontsize(9)
-        autotext.set_weight('bold')
-    
-    # Service Count vs Revenue Scatter
-    service_counts = [item['count'] for item in analysis['serviceBreakdown'][:8]]
-    service_revs = [item['revenue'] for item in analysis['serviceBreakdown'][:8]]
-    
-    scatter = ax4.scatter(service_counts, service_revs, s=200, alpha=0.6,
-                          c=range(len(service_counts)), cmap='viridis',
-                          edgecolors='#2c3e50', linewidth=2)
-    ax4.set_xlabel('Service Count', fontsize=10, weight='bold', color='#2c3e50')
-    ax4.set_ylabel('Revenue (₹)', fontsize=10, weight='bold', color='#2c3e50')
-    ax4.set_title('Service Performance Matrix', fontsize=12, weight='bold', pad=15, color='#2c3e50')
-    ax4.grid(alpha=0.3, linestyle='--')
-    ax4.spines['top'].set_visible(False)
-    ax4.spines['right'].set_visible(False)
-    
-    plt.tight_layout()
-    
-    buffer = io.BytesIO()
-    plt.savefig(buffer, format='png', dpi=150, bbox_inches='tight', facecolor='white')
-    buffer.seek(0)
-    image_bytes = buffer.read()
-    plt.close(fig)
-    
-    return image_bytes
-
-
-def generate_template3_html_with_cid(analysis: Dict[str, Any], location_name: str, 
-                                     today_str: str) -> Tuple[str, Dict[str, bytes]]:
-    """
-    Generate HTML for Template 3 with CID references and return chart data separately
-    
-    Returns:
-        Tuple[str, Dict[str, bytes]]: (HTML content, dictionary of {cid: image_bytes})
-    """
-    
-    # Generate charts as bytes
-    hourly_chart_bytes = generate_gradient_bar_chart(analysis['hourlyBreakdown'])
-    multi_metric_bytes = generate_multi_metric_chart(analysis)
-    
-    # Create CID mapping
-    chart_images = {
-        'hourly_chart': hourly_chart_bytes,
-        'multi_metric_chart': multi_metric_bytes
-    }
-    
-    # Key metrics
     peak_hour = analysis['summary']['peakHour']
     peak_revenue = analysis['summary']['peakHourRevenue']
     top_service = analysis['insights']['topService']
     top_service_revenue = analysis['insights']['topServiceRevenue']
     
-    # Calculate growth indicators (mock for now)
-    revenue_trend = "+12.5%"
-    transaction_trend = "+8.3%"
+    # Prepare chart data
+    payment_labels = [item['mode'] for item in analysis['paymentModeBreakdown']]
+    payment_data = [item['revenue'] for item in analysis['paymentModeBreakdown']]
     
-    # Payment cards with simplified styling
-    payment_cards = ""
-    for idx, item in enumerate(analysis['paymentModeBreakdown']):
-        gradients = [
-            "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
-            "linear-gradient(135deg, #f093fb 0%, #f5576c 100%)",
-            "linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)",
-            "linear-gradient(135deg, #43e97b 0%, #38f9d7 100%)",
-            "linear-gradient(135deg, #fa709a 0%, #fee140 100%)"
-        ]
-        gradient = gradients[idx % len(gradients)]
-        accent_color = ['#667eea', '#f093fb', '#4facfe', '#43e97b', '#fa709a'][idx % 5]
-        
-        upi_breakdown = ""
-        if item['mode'].lower() == 'upi' and item.get('upiAccounts'):
-            upi_rows = ""
-            for account_name, account_data in item['upiAccounts'].items():
-                percentage = (account_data['amount'] / item['revenue'] * 100) if item['revenue'] > 0 else 0
-                upi_rows += f"""
-                <div style="background: #f8f9fa; padding: 12px 16px; border-radius: 8px; margin-top: 10px; border-left: 4px solid {accent_color};">
-                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                    <span style="font-weight: 700; color: #2c3e50; font-size: 14px;">{account_name}</span>
-                    <span style="background: {accent_color}; color: white; padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 700;">{percentage:.1f}%</span>
-                  </div>
-                  <div style="display: flex; justify-content: space-between; font-size: 13px; color: #555;">
-                    <span style="font-weight: 600;">💰 ₹{account_data['amount']:,}</span>
-                    <span style="font-weight: 600;">🔢 {account_data['count']} txns</span>
-                  </div>
-                  <div style="background-color: #dee2e6; height: 4px; border-radius: 2px; overflow: hidden; margin-top: 6px;">
-                    <div style="background: {accent_color}; height: 100%; width: {percentage}%; border-radius: 2px;"></div>
-                  </div>
-                </div>
-                """
-            upi_breakdown = f"""
-            <div style="margin-top: 16px; padding-top: 16px; border-top: 2px solid #e9ecef;">
-              <div style="font-weight: 700; color: #2c3e50; font-size: 14px; margin-bottom: 10px;">
-                UPI Account Performance
-              </div>
-              {upi_rows}
-            </div>
-            """
-        
-        payment_cards += f"""
-        <div style="background: white; padding: 24px; border-radius: 12px; box-shadow: 0 3px 12px rgba(0,0,0,0.1); border-left: 4px solid {accent_color};">
-          <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 16px;">
-            <div>
-              <h3 style="margin: 0; color: #1a1a1a; font-size: 20px; font-weight: 800;">{item['mode']}</h3>
-              <p style="margin: 4px 0 0 0; color: #7f8c8d; font-size: 12px; font-weight: 600; text-transform: uppercase;">Payment Method</p>
-            </div>
-            <div style="background: {gradient}; color: white; padding: 6px 14px; border-radius: 20px; font-size: 13px; font-weight: 700;">
-              {item['percentage']:.1f}%
-            </div>
-          </div>
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 16px;">
-            <div style="background: #f8f9fa; padding: 16px; border-radius: 8px;">
-              <div style="color: #7f8c8d; font-size: 11px; text-transform: uppercase; margin-bottom: 6px; font-weight: 700;">Total Revenue</div>
-              <div style="color: #1a1a1a; font-size: 24px; font-weight: 800;">₹{item['revenue']:,}</div>
-            </div>
-            <div style="background: #f8f9fa; padding: 16px; border-radius: 8px;">
-              <div style="color: #7f8c8d; font-size: 11px; text-transform: uppercase; margin-bottom: 6px; font-weight: 700;">Transactions</div>
-              <div style="color: #1a1a1a; font-size: 24px; font-weight: 800;">{item['count']}</div>
-            </div>
-          </div>
-          {upi_breakdown}
-        </div>
-        """
+    service_labels = [item['service'] for item in analysis['serviceBreakdown']]
+    service_revenue = [item['revenue'] for item in analysis['serviceBreakdown']]
+    service_counts = [item['count'] for item in analysis['serviceBreakdown']]
     
-    # Service performance cards
-    service_cards = ""
-    for idx, item in enumerate(analysis['serviceBreakdown'][:6]):
-        revenue_width = (item['revenue'] / analysis['totalRevenue'] * 100) if analysis['totalRevenue'] > 0 else 0
-        colors = ['#667eea', '#f093fb', '#4facfe', '#43e97b', '#fa709a', '#ff6b6b']
-        color = colors[idx % len(colors)]
-        
-        service_cards += f"""
-        <div style="background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); border-left: 4px solid {color}; margin-bottom: 12px;">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-            <h4 style="margin: 0; color: #1a1a1a; font-size: 17px; font-weight: 800;">{item['service']}</h4>
-            <span style="background-color: {color}; color: white; padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: 700;">{item['revenueShare']:.1f}%</span>
-          </div>
-          <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 12px;">
-            <div>
-              <div style="color: #95a5a6; font-size: 10px; text-transform: uppercase; margin-bottom: 4px; font-weight: 700;">Count</div>
-              <div style="color: #1a1a1a; font-size: 18px; font-weight: 800;">{item['count']}</div>
-            </div>
-            <div>
-              <div style="color: #95a5a6; font-size: 10px; text-transform: uppercase; margin-bottom: 4px; font-weight: 700;">Revenue</div>
-              <div style="color: #1a1a1a; font-size: 18px; font-weight: 800;">₹{item['revenue']:,}</div>
-            </div>
-            <div>
-              <div style="color: #95a5a6; font-size: 10px; text-transform: uppercase; margin-bottom: 4px; font-weight: 700;">Avg Price</div>
-              <div style="color: #1a1a1a; font-size: 18px; font-weight: 800;">₹{round(item['price'])}</div>
-            </div>
-          </div>
-          <div style="background-color: #e9ecef; height: 6px; border-radius: 3px; overflow: hidden;">
-            <div style="background: {color}; height: 100%; width: {revenue_width}%; border-radius: 3px;"></div>
-          </div>
-        </div>
-        """
+    vehicle_labels = [item['type'] for item in analysis['vehicleDistribution']]
+    vehicle_counts = [item['count'] for item in analysis['vehicleDistribution']]
     
-    # Vehicle distribution bars
-    vehicle_bars = ""
-    for item in analysis['vehicleDistribution']:
-        vehicle_bars += f"""
-        <div style="margin-bottom: 18px;">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-            <span style="font-weight: 800; color: #1a1a1a; font-size: 15px;">{item['type']}</span>
-            <div style="text-align: right;">
-              <span style="color: #2c3e50; font-size: 14px; font-weight: 700;">{item['count']} units</span>
-              <span style="color: #95a5a6; font-size: 13px; margin-left: 8px; font-weight: 600;">({item['percentage']:.1f}%)</span>
-            </div>
-          </div>
-          <div style="background-color: #e9ecef; height: 10px; border-radius: 5px; overflow: hidden;">
-            <div style="background: linear-gradient(90deg, #4facfe 0%, #00f2fe 100%); height: 100%; width: {item['percentage']}%; border-radius: 5px;"></div>
-          </div>
-        </div>
-        """
+    hourly_labels = [item['display'] for item in analysis['hourlyBreakdown']]
+    hourly_amounts = [item['revenue'] for item in analysis['hourlyBreakdown']]
+    hourly_counts = [item['count'] for item in analysis['hourlyBreakdown']]
     
-    html_content = f"""
+    return f"""
 <!DOCTYPE html>
 <html>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Business Intelligence Report - Premium</title>
-  <style>
-    * {{
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }}
-    
-    body {{
-      margin: 0;
-      padding: 20px;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
-      background: #f5f7fa;
-      line-height: 1.6;
-    }}
-    
-    .container {{
-      max-width: 1000px;
-      margin: 0 auto;
-      background-color: #ffffff;
-      border-radius: 16px;
-      overflow: hidden;
-      box-shadow: 0 10px 40px rgba(0,0,0,0.1);
-    }}
-    
-    .header {{
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      color: white;
-      padding: 48px 40px;
-    }}
-    
-    .header h1 {{
-      margin: 0;
-      font-size: 40px;
-      font-weight: 900;
-      line-height: 1.2;
-    }}
-    
-    .header-meta {{
-      margin-top: 12px;
-      font-size: 16px;
-      opacity: 0.95;
-      font-weight: 600;
-    }}
-    
-    .content {{
-      padding: 40px;
-    }}
-    
-    .kpi-grid {{
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 16px;
-      margin-bottom: 40px;
-    }}
-    
-    .kpi-card {{
-      padding: 24px 20px;
-      border-radius: 12px;
-      text-align: center;
-      box-shadow: 0 6px 20px rgba(0,0,0,0.1);
-      color: white;
-    }}
-    
-    .kpi-card:nth-child(1) {{
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    }}
-    
-    .kpi-card:nth-child(2) {{
-      background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-    }}
-    
-    .kpi-card:nth-child(3) {{
-      background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
-    }}
-    
-    .kpi-card:nth-child(4) {{
-      background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
-    }}
-    
-    .kpi-label {{
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 1px;
-      font-weight: 700;
-      margin-bottom: 8px;
-      opacity: 0.9;
-    }}
-    
-    .kpi-value {{
-      font-size: 32px;
-      font-weight: 900;
-      line-height: 1;
-    }}
-    
-    .kpi-trend {{
-      font-size: 12px;
-      margin-top: 6px;
-      font-weight: 600;
-      opacity: 0.85;
-    }}
-    
-    .insights-panel {{
-      background: #f8f9fa;
-      padding: 24px;
-      border-radius: 12px;
-      margin-bottom: 40px;
-      border-left: 5px solid #667eea;
-    }}
-    
-    .section {{
-      margin-bottom: 40px;
-    }}
-    
-    .section-title {{
-      color: #1a1a1a;
-      font-size: 24px;
-      font-weight: 900;
-      margin: 0 0 20px 0;
-    }}
-    
-    .chart-container {{
-      background: white;
-      padding: 28px;
-      border-radius: 12px;
-      box-shadow: 0 3px 12px rgba(0,0,0,0.08);
-      margin-bottom: 24px;
-    }}
-    
-    .chart-container img {{
-      width: 100%;
-      height: auto;
-      border-radius: 8px;
-    }}
-    
-    .cards-grid {{
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
-      gap: 20px;
-    }}
-    
-    .footer-banner {{
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      color: white;
-      padding: 28px;
-      border-radius: 12px;
-      text-align: center;
-      margin-top: 40px;
-    }}
-    
-    .footer {{
-      background: #f8f9fa;
-      padding: 28px 40px;
-      text-align: center;
-    }}
-    
-    @media only screen and (max-width: 768px) {{
-      .container {{
-        border-radius: 0;
-        margin: 0;
-      }}
-      
-      .header {{
-        padding: 32px 24px;
-      }}
-      
-      .header h1 {{
-        font-size: 28px;
-      }}
-      
-      .content {{
-        padding: 28px 20px;
-      }}
-      
-      .kpi-grid {{
-        grid-template-columns: repeat(2, 1fr);
-        gap: 12px;
-      }}
-      
-      .cards-grid {{
-        grid-template-columns: 1fr;
-      }}
-    }}
-  </style>
+  <title>Business Intelligence Report</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
 </head>
-<body>
-  <div class="container">
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f7fa;">
+  
+  <div style="max-width: 1200px; margin: 0 auto; padding: 20px;">
     
     <!-- Header -->
-    <div class="header">
-      <h1>📊 Business Intelligence Report</h1>
-      <div class="header-meta">
-        📅 {today_str} • 📍 {location_name}
+    <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; border-radius: 8px; margin-bottom: 20px;">
+      <h1 style="margin: 0; font-size: 28px; font-weight: 700;">Business Intelligence Report</h1>
+      <p style="margin: 8px 0 0 0; font-size: 16px; opacity: 0.9;">{today_str} • {location_name}</p>
+    </div>
+    
+    <!-- KPIs -->
+    <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 20px;">
+      <div style="background: white; padding: 20px; border-radius: 8px; border-left: 4px solid #667eea;">
+        <div style="color: #666; font-size: 12px; margin-bottom: 5px;">TOTAL REVENUE</div>
+        <div style="color: #1a1a1a; font-size: 24px; font-weight: 700;">₹{analysis['totalRevenue']:,}</div>
+      </div>
+      <div style="background: white; padding: 20px; border-radius: 8px; border-left: 4px solid #f093fb;">
+        <div style="color: #666; font-size: 12px; margin-bottom: 5px;">TRANSACTIONS</div>
+        <div style="color: #1a1a1a; font-size: 24px; font-weight: 700;">{analysis['totalVehicles']}</div>
+      </div>
+      <div style="background: white; padding: 20px; border-radius: 8px; border-left: 4px solid #4facfe;">
+        <div style="color: #666; font-size: 12px; margin-bottom: 5px;">AVG TRANSACTION</div>
+        <div style="color: #1a1a1a; font-size: 24px; font-weight: 700;">₹{round(analysis['avgService'])}</div>
+      </div>
+      <div style="background: white; padding: 20px; border-radius: 8px; border-left: 4px solid #43e97b;">
+        <div style="color: #666; font-size: 12px; margin-bottom: 5px;">PEAK HOUR</div>
+        <div style="color: #1a1a1a; font-size: 24px; font-weight: 700;">{peak_hour}</div>
       </div>
     </div>
     
-    <div class="content">
+    <!-- Charts Grid -->
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
       
-      <!-- KPI Dashboard -->
-      <div class="kpi-grid">
-        <div class="kpi-card">
-          <div class="kpi-label">Total Revenue</div>
-          <div class="kpi-value">₹{analysis['totalRevenue']:,}</div>
-          <div class="kpi-trend">↑ {revenue_trend} vs yesterday</div>
-        </div>
-        
-        <div class="kpi-card">
-          <div class="kpi-label">Total Transactions</div>
-          <div class="kpi-value">{analysis['totalVehicles']}</div>
-          <div class="kpi-trend">↑ {transaction_trend} vs yesterday</div>
-        </div>
-        
-        <div class="kpi-card">
-          <div class="kpi-label">Avg Transaction</div>
-          <div class="kpi-value">₹{round(analysis['avgService'])}</div>
-          <div class="kpi-trend">Transaction average</div>
-        </div>
-        
-        <div class="kpi-card">
-          <div class="kpi-label">Peak Hour</div>
-          <div class="kpi-value" style="font-size: 22px;">{peak_hour}</div>
-          <div class="kpi-trend">₹{peak_revenue:,} revenue</div>
-        </div>
+      <!-- Payment Chart -->
+      <div style="background: white; padding: 20px; border-radius: 8px;">
+        <h3 style="margin: 0 0 15px 0; font-size: 16px; color: #1a1a1a;">Payment Distribution</h3>
+        <canvas id="paymentChart" style="max-height: 300px;"></canvas>
       </div>
       
-      <!-- Strategic Insights Panel -->
-      <div class="insights-panel">
-        <h3 style="margin: 0 0 16px 0; color: #1a1a1a; font-size: 20px; font-weight: 900;">
-          💡 Strategic Insights & Key Metrics
-        </h3>
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px;">
-          <div style="background: white; padding: 18px; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.05);">
-            <div style="color: #7f8c8d; font-size: 11px; text-transform: uppercase; margin-bottom: 6px; font-weight: 700;">🏆 Top Service</div>
-            <div style="color: #1a1a1a; font-size: 18px; font-weight: 900; margin-bottom: 4px;">{top_service}</div>
-            <div style="color: #667eea; font-size: 14px; font-weight: 700;">₹{top_service_revenue:,} revenue</div>
-          </div>
-          <div style="background: white; padding: 18px; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.05);">
-            <div style="color: #7f8c8d; font-size: 11px; text-transform: uppercase; margin-bottom: 6px; font-weight: 700;">⏰ Active Hours</div>
-            <div style="color: #1a1a1a; font-size: 18px; font-weight: 900; margin-bottom: 4px;">{analysis['insights']['busyHours']} operational hours</div>
-            <div style="color: #f093fb; font-size: 14px; font-weight: 700;">Business activity</div>
-          </div>
-          <div style="background: white; padding: 18px; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.05);">
-            <div style="color: #7f8c8d; font-size: 11px; text-transform: uppercase; margin-bottom: 6px; font-weight: 700;">📈 Peak Performance</div>
-            <div style="color: #1a1a1a; font-size: 18px; font-weight: 900; margin-bottom: 4px;">{peak_hour}</div>
-            <div style="color: #4facfe; font-size: 14px; font-weight: 700;">Highest revenue time</div>
-          </div>
-        </div>
+      <!-- Service Chart -->
+      <div style="background: white; padding: 20px; border-radius: 8px;">
+        <h3 style="margin: 0 0 15px 0; font-size: 16px; color: #1a1a1a;">Service Revenue</h3>
+        <canvas id="serviceChart" style="max-height: 300px;"></canvas>
       </div>
       
-      <!-- Multi-Metric Analysis Chart -->
-      <div class="section">
-        <h2 class="section-title">📊 Multi-Metric Performance Analysis</h2>
-        <div class="chart-container">
-          <img src="cid:multi_metric_chart" alt="Multi-Metric Analysis">
-        </div>
+    </div>
+    
+    <!-- Full Width Charts -->
+    <div style="background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+      <h3 style="margin: 0 0 15px 0; font-size: 16px; color: #1a1a1a;">Hourly Revenue Trend</h3>
+      <canvas id="hourlyChart" style="max-height: 300px;"></canvas>
+    </div>
+    
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
+      
+      <!-- Vehicle Distribution -->
+      <div style="background: white; padding: 20px; border-radius: 8px;">
+        <h3 style="margin: 0 0 15px 0; font-size: 16px; color: #1a1a1a;">Vehicle Distribution</h3>
+        <canvas id="vehicleChart" style="max-height: 300px;"></canvas>
       </div>
       
-      <!-- Payment Analytics -->
-      <div class="section">
-        <h2 class="section-title">💳 Advanced Payment Analytics</h2>
-        <div class="cards-grid">
-          {payment_cards}
+      <!-- Top Service -->
+      <div style="background: white; padding: 20px; border-radius: 8px;">
+        <h3 style="margin: 0 0 15px 0; font-size: 16px; color: #1a1a1a;">Top Performer</h3>
+        <div style="padding: 40px 0; text-align: center;">
+          <div style="font-size: 32px; font-weight: 700; color: #667eea; margin-bottom: 10px;">{top_service}</div>
+          <div style="font-size: 18px; color: #666;">₹{top_service_revenue:,}</div>
         </div>
-      </div>
-      
-      <!-- Service Performance -->
-      <div class="section">
-        <h2 class="section-title">🛠️ Service Performance Metrics</h2>
-        <div style="background: white; padding: 24px; border-radius: 12px; box-shadow: 0 3px 12px rgba(0,0,0,0.08);">
-          {service_cards}
-        </div>
-      </div>
-      
-      <!-- Vehicle Analytics -->
-      <div class="section">
-        <h2 class="section-title">🚗 Vehicle Type Analytics</h2>
-        <div style="background: white; padding: 28px; border-radius: 12px; box-shadow: 0 3px 12px rgba(0,0,0,0.08);">
-          {vehicle_bars}
-        </div>
-      </div>
-      
-      <!-- Hourly Revenue Trend -->
-      <div class="section">
-        <h2 class="section-title">📈 Hourly Revenue Performance Trend</h2>
-        <div class="chart-container">
-          <img src="cid:hourly_chart" alt="Hourly Performance Trend">
-        </div>
-      </div>
-      
-      <!-- Footer Banner -->
-      <div class="footer-banner">
-        <div style="font-size: 18px; font-weight: 900; margin-bottom: 10px;">🔎 Comprehensive Analytics Package</div>
-        <p style="margin: 0; font-size: 15px; line-height: 1.6; font-weight: 500; opacity: 0.95;">
-          This premium report includes 3 detailed CSV attachments with complete data:<br>
-          <strong>Transaction Report • Payment Analytics • Service Performance Metrics</strong>
-        </p>
       </div>
       
     </div>
     
     <!-- Footer -->
-    <div class="footer">
-      <p style="margin: 0; color: #2c3e50; font-size: 13px; font-weight: 700;">
-        Advanced Analytics Report Generated on {datetime.now().strftime("%d/%m/%Y at %H:%M")}
-      </p>
-      <p style="margin: 8px 0 0 0; color: #7f8c8d; font-size: 12px; font-weight: 600;">
-        Powered by Premium Business Intelligence Platform
+    <div style="background: white; padding: 20px; border-radius: 8px; text-align: center;">
+      <p style="margin: 0; color: #666; font-size: 13px;">
+        Report generated on {datetime.now().strftime("%d/%m/%Y at %H:%M")}
       </p>
     </div>
     
   </div>
+  
+  <script>
+    // Payment Chart
+    new Chart(document.getElementById('paymentChart'), {{
+      type: 'doughnut',
+      data: {{
+        labels: {json.dumps(payment_labels)},
+        datasets: [{{
+          data: {json.dumps(payment_data)},
+          backgroundColor: ['#667eea', '#f093fb', '#4facfe', '#43e97b']
+        }}]
+      }},
+      options: {{
+        responsive: true,
+        maintainAspectRatio: true,
+        plugins: {{
+          legend: {{ position: 'bottom' }}
+        }}
+      }}
+    }});
+    
+    // Service Chart
+    new Chart(document.getElementById('serviceChart'), {{
+      type: 'bar',
+      data: {{
+        labels: {json.dumps(service_labels)},
+        datasets: [{{
+          label: 'Revenue',
+          data: {json.dumps(service_revenue)},
+          backgroundColor: '#f093fb'
+        }}]
+      }},
+      options: {{
+        responsive: true,
+        maintainAspectRatio: true,
+        plugins: {{ legend: {{ display: false }} }},
+        scales: {{
+          y: {{
+            beginAtZero: true,
+            ticks: {{ callback: function(value) {{ return '₹' + value.toLocaleString(); }} }}
+          }}
+        }}
+      }}
+    }});
+    
+    // Hourly Chart
+    new Chart(document.getElementById('hourlyChart'), {{
+      type: 'line',
+      data: {{
+        labels: {json.dumps(hourly_labels)},
+        datasets: [{{
+          label: 'Revenue',
+          data: {json.dumps(hourly_amounts)},
+          borderColor: '#667eea',
+          backgroundColor: 'rgba(102, 126, 234, 0.1)',
+          fill: true,
+          tension: 0.4
+        }}]
+      }},
+      options: {{
+        responsive: true,
+        maintainAspectRatio: true,
+        plugins: {{ legend: {{ display: false }} }},
+        scales: {{
+          y: {{
+            beginAtZero: true,
+            ticks: {{ callback: function(value) {{ return '₹' + value.toLocaleString(); }} }}
+          }}
+        }}
+      }}
+    }});
+    
+    // Vehicle Chart
+    new Chart(document.getElementById('vehicleChart'), {{
+      type: 'pie',
+      data: {{
+        labels: {json.dumps(vehicle_labels)},
+        datasets: [{{
+          data: {json.dumps(vehicle_counts)},
+          backgroundColor: ['#667eea', '#f093fb', '#4facfe', '#43e97b', '#ff6b6b']
+        }}]
+      }},
+      options: {{
+        responsive: true,
+        maintainAspectRatio: true,
+        plugins: {{
+          legend: {{ position: 'bottom' }}
+        }}
+      }}
+    }});
+  </script>
+  
 </body>
 </html>
-    """
-    
-    return html_content.strip(), chart_images
-
-
-# Example usage function
-def example_usage():
-    """
-    Example showing how to use the CID-based template
-    
-    When sending email, you would:
-    1. Call generate_template3_html_with_cid() to get HTML and image data
-    2. Create MIME multipart message
-    3. Attach images with Content-ID headers
-    4. HTML references images via cid: URLs
-    """
-    
-    # Example with email.mime
-    from email.mime.multipart import MIMEMultipart
-    from email.mime.text import MIMEText
-    from email.mime.image import MIMEImage
-    
-    # Your analysis data here
-    analysis = {...}  # Your actual analysis dictionary
-    location_name = "Downtown Center"
-    today_str = "19/10/2025"
-    
-    # Generate HTML and get chart images
-    html_content, chart_images = generate_template3_html_with_cid(
-        analysis, location_name, today_str
-    )
-    
-    # Create message
-    msg = MIMEMultipart('related')
-    msg['Subject'] = 'Business Intelligence Report'
-    msg['From'] = 'sender@example.com'
-    msg['To'] = 'recipient@example.com'
-    
-    # Attach HTML
-    html_part = MIMEText(html_content, 'html')
-    msg.attach(html_part)
-    
-    # Attach images with CID
-    for cid, image_bytes in chart_images.items():
-        img = MIMEImage(image_bytes)
-        img.add_header('Content-ID', f'<{cid}>')
-        img.add_header('Content-Disposition', 'inline', filename=f'{cid}.png')
-        msg.attach(img)
-    
-    # Now send msg via your SMTP server
-    # smtp.send_message(msg)
-    
-    return msg
+    """.strip()
