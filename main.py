@@ -825,8 +825,9 @@ from supabase.lib.client_options import ClientOptions
 
 # Import template generators
 from template1 import generate_template1_html
-from template2 import generate_template2_html
-from template3 import generate_template3_html
+# template2/3 return MIMEMultipart objects named generate_templateX_email; import and alias to keep main's naming
+from template2 import generate_template2_email as generate_template2_html
+from template3 import generate_template3_email as generate_template3_html
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -1339,43 +1340,77 @@ def generate_service_breakdown_csv(logs: List[Dict[str, Any]]) -> str:
 
 
 def generate_email_html(analysis: Dict[str, Any], location_name: str, today_str: str,
-                       template_no: int) -> str:
-    """Generate email HTML using selected template"""
+                       template_no: int):
+    """Generate email content using selected template.
+
+    Returns a MIMEMultipart object (so CID images are preserved). For templates
+    that only return HTML (template1), we wrap the HTML into a related multipart.
+    """
+    # Template 2 and 3 already return a MIMEMultipart (related) object
     if template_no == 3:
         return generate_template3_html(analysis, location_name, today_str)
     elif template_no == 2:
         return generate_template2_html(analysis, location_name, today_str)
+
+    # Template 1 returns an HTML string; wrap it into a MIMEMultipart
+    html = generate_template1_html(analysis, location_name, today_str)
+    msg = MIMEMultipart('related')
+    msg.attach(MIMEText(html, 'html', 'utf-8'))
+    return msg
+
+
+def send_email_with_attachments_ses(from_email: str, to_email: str, subject: str,
+                                    html_content_or_msg, text_content: str,
+                                    attachments: List[Dict[str, Any]]):
+    """Send email with attachments using AWS SES API.
+
+    html_content_or_msg may be either a string (HTML) or a prebuilt
+    MIMEMultipart message (used by template2/3 which embed CID images). This
+    function will attach CSVs to the outgoing message and send the final raw
+    MIME via SES so inline images (CIDs) are preserved.
+    """
+
+    # If caller supplied a MIMEMultipart (template with inline images), use it
+    if isinstance(html_content_or_msg, MIMEMultipart):
+        msg = html_content_or_msg
+        # Ensure headers
+        msg['Subject'] = msg.get('Subject', subject)
+        msg['From'] = msg.get('From', from_email)
+        msg['To'] = msg.get('To', to_email)
+
+        # Attach CSV files to the top-level message. If the message is
+        # 'related', wrap it in a 'mixed' container so attachments are separate.
+        if msg.get_content_type() == 'multipart/related':
+            mixed = MIMEMultipart('mixed')
+            # copy headers
+            mixed['Subject'] = msg['Subject']
+            mixed['From'] = msg['From']
+            mixed['To'] = msg['To']
+            # move existing related part into mixed
+            mixed.attach(msg)
+            msg = mixed
     else:
-        return generate_template1_html(analysis, location_name, today_str)
+        # html_content_or_msg is an HTML string
+        msg = MIMEMultipart('mixed')
+        msg['Subject'] = subject
+        msg['From'] = from_email
+        msg['To'] = to_email
 
+        msg_body = MIMEMultipart('alternative')
+        text_part = MIMEText(text_content, 'plain', 'utf-8')
+        html_part = MIMEText(str(html_content_or_msg), 'html', 'utf-8')
+        msg_body.attach(text_part)
+        msg_body.attach(html_part)
+        msg.attach(msg_body)
 
-def send_email_with_attachments_ses(from_email: str, to_email: str, subject: str, 
-                                    html_content: str, text_content: str, 
-                                    attachments: List[Dict[str, Any]]) -> None:
-    """Send email with attachments using AWS SES API"""
-    
-    msg = MIMEMultipart('mixed')
-    msg['Subject'] = subject
-    msg['From'] = from_email
-    msg['To'] = to_email
-    
-    msg_body = MIMEMultipart('alternative')
-    
-    text_part = MIMEText(text_content, 'plain', 'utf-8')
-    html_part = MIMEText(html_content, 'html', 'utf-8')
-    
-    msg_body.attach(text_part)
-    msg_body.attach(html_part)
-    
-    msg.attach(msg_body)
-    
+    # Attach CSV files
     for attachment in attachments:
         part = MIMEBase('application', 'octet-stream')
         part.set_payload(attachment['content'].encode('utf-8'))
         encoders.encode_base64(part)
         part.add_header('Content-Disposition', f'attachment; filename={attachment["filename"]}')
         msg.attach(part)
-    
+
     try:
         ses = get_ses_client()
         response = ses.send_raw_email(
@@ -1531,7 +1566,7 @@ def send_reports():
             
             # Send no-data email if no logs
             if len(owner_today_logs) == 0:
-                logger.info(f"Sending no-data notification to {owner['email']} for {location_name}")
+                logger.info(f"Sending no-data notification to admin inbox (a6hinandh@gmail.com) for {location_name}")
                 try:
                     no_data_html = generate_no_data_email_html(location_name, today_str, None)
                     no_data_text = f"""No Data Report - {today_str}
@@ -1551,10 +1586,10 @@ Generated on: {datetime.now().strftime("%d/%m/%Y at %H:%M")}"""
                     )
                     
                     emails_sent += 1
-                    logger.info(f"No-data email sent to {owner['email']}")
+                    logger.info(f"No-data email sent to admin inbox (a6hinandh@gmail.com)")
                     email_results.append({
                         'owner': get_owner_display_name(owner),
-                        'email': owner['email'],
+                        'email': "a6hinandh@gmail.com",
                         'status': 'success',
                         'recordCount': 0,
                         'revenue': 0,
