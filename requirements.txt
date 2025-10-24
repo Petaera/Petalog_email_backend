@@ -1,7 +1,14 @@
+# Core Framework
 Flask==3.0.0
-python-dateutil==2.8.2
 gunicorn==21.2.0
+
+# Date/Time
+python-dateutil==2.8.2
+
+# Environment
 python-dotenv==1.0.0
+
+# Supabase Client
 supabase==2.21.1
 httpx==0.28.1
 asgiref==3.10.0
@@ -11,8 +18,17 @@ postgrest==2.21.1
 storage3==2.21.1
 supabase-auth==2.21.1
 supabase-functions==2.21.1
+
+# JWT
 pyjwt[crypto]==2.10.1
+
+# AWS SES
 boto3==1.34.44
 botocore==1.34.44
+
+# Chart Generation
 matplotlib==3.9.4
 numpy==2.2.3
+
+# Image Processing (implicit matplotlib dependency)
+Pillow>=10.0.0
