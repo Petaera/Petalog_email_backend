@@ -971,6 +971,9 @@ def send_reports():
         
         logger.info(f"Found {len(locations)} locations")
         
+        # Create a mapping of scheduled user data for quick lookup
+        scheduled_user_map = {user['user_id']: user for user in scheduled_users}
+        
         # Fetch owners based on scheduled users
         if scheduled_users:
             # Get only the scheduled users
@@ -980,21 +983,25 @@ def send_reports():
             response = supabase.table('users').select('id,email,assigned_location,role,first_name,last_name').in_('id', user_ids).eq('role', 'owner').execute()
             owners = response.data
             
-            # Merge template info from scheduled_users
+            # Merge template and timezone info from the request payload
             for owner in owners:
-              scheduled_user = next((u for u in scheduled_users if u['user_id'] == owner['id']), None)
-              if scheduled_user:
-                owner['timezone'] = scheduled_user.get('timezone', 'UTC')
-                # Get templateno from user_schedules
-                owner['templateno'] = scheduled_user.get('templateno', 1) 
+                scheduled_data = scheduled_user_map.get(owner['id'])
+                if scheduled_data:
+                    # Get templateno and timezone directly from the request
+                    owner['templateno'] = scheduled_data.get('templateno', 1)
+                    owner['timezone'] = scheduled_data.get('timezone', 'UTC')
+                else:
+                    # Fallback if somehow not in map
+                    owner['templateno'] = 1
+                    owner['timezone'] = 'UTC'
         else:
             # Fallback: fetch all owners (backward compatibility)
             response = supabase.table('users').select('id,email,assigned_location,role,first_name,last_name').eq('role', 'owner').execute()
             owners = response.data
-            # Set default timezone for all
+            # Set default timezone and template for all
             for owner in owners:
                 owner['timezone'] = 'UTC'
-                owner['templateno'] = 1 
+                owner['templateno'] = 1
         
         logger.info(f"Found {len(owners) if owners else 0} owners to process")
         
@@ -1043,6 +1050,7 @@ def send_reports():
                 })
                 continue
             
+            # Get template and timezone from the merged owner data (from request payload)
             owner_template_no = owner.get('templateno', 1) or 1
             owner_timezone = owner.get('timezone', 'UTC')
             is_multi_location = len(owner_location_ids) > 1
@@ -1316,7 +1324,6 @@ Generated on: {datetime.now().strftime("%d/%m/%Y at %H:%M")}"""
             'multiLocationSupport': 'Enabled',
             'schedulingSupport': 'Enabled'
         }), 500
-
 
 @app.route('/health', methods=['GET'])
 def health():
