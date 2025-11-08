@@ -1129,7 +1129,7 @@ Generated on: {datetime.now().strftime("%d/%m/%Y at %H:%M")}"""
                     
                     send_email_with_attachments_ses(
                         from_email,
-                        "a6hinandh@gmail.com",
+                        owner['email'],
                         f"No Data Today - {today_str}",
                         no_data_html,
                         no_data_text,
@@ -1224,7 +1224,7 @@ Generated on: {datetime.now().strftime("%d/%m/%Y at %H:%M")}"""
                 # Send email
                 send_email_with_attachments_ses(
                     from_email,
-                    "a6hinandh@gmail.com",
+                    owner['email'],
                     f"{'Business Intelligence Report' if owner_template_no == 3 else 'Daily Report'} - {today_str} - {subject_suffix}",
                     html_content,
                     text_content,
