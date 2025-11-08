@@ -3,8 +3,8 @@ Daily Reports Email Service
 Converts Supabase Edge Function to Python Flask server
 Works locally and on Render
 Uses AWS SES API instead of SMTP
-Sends reports to all owners with their specific templates
-ENHANCED: Multi-location support for owners with multiple branches
+Sends reports to scheduled users with their specific templates and timezones
+ENHANCED: Multi-location support + User-specific scheduling
 """
 
 from flask import Flask, request, jsonify
@@ -21,6 +21,7 @@ import os
 import re
 from typing import List, Dict, Any, Optional
 import logging
+import pytz
 
 # Initialize Supabase client with custom options
 from supabase.lib.client_options import ClientOptions
@@ -123,7 +124,7 @@ def escape_csv(value: Any) -> str:
     return str_value
 
 
-def generate_no_data_email_html(location_name: str, today_str: str, test_email: Optional[str]) -> str:
+def generate_no_data_email_html(location_names: str, today_str: str, test_email: Optional[str]) -> MIMEMultipart:
     """Generate HTML for no-data notification email"""
     test_banner = f"""
     <div style="background-color: #ff9800; color: white; padding: 12px 24px; text-align: center; font-weight: bold;">
@@ -133,7 +134,7 @@ def generate_no_data_email_html(location_name: str, today_str: str, test_email: 
     
     test_footer = f'<p style="margin: 8px 0 0 0; color: #ff9800; font-size: 12px; font-weight: bold;">Test email sent to: {test_email}</p>' if test_email else ""
     
-    return f"""
+    html = f"""
 <!DOCTYPE html>
 <html>
 <head>
@@ -147,21 +148,28 @@ def generate_no_data_email_html(location_name: str, today_str: str, test_email: 
     {test_banner}
     
     <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 32px 24px; text-align: center;">
-      <h1 style="margin: 0; font-size: 28px; font-weight: 600;">No Data Today</h1>
-      <p style="margin: 8px 0 0 0; font-size: 14px; opacity: 0.9;">{today_str}</p>
+      <h1 style="margin: 0; font-size: 32px; font-weight: 600;">📊 Daily Business Report</h1>
+      <p style="margin: 8px 0 0 0; font-size: 16px; opacity: 0.9;">{today_str}</p>
+      <p style="margin: 4px 0 0 0; font-size: 14px; opacity: 0.8;">📍 {location_names}</p>
     </div>
     
-    <div style="padding: 40px 24px;">
-      <div style="background-color: #f8f9fa; border-left: 4px solid #667eea; padding: 20px; border-radius: 4px; margin-bottom: 24px;">
-        <h2 style="margin: 0 0 8px 0; font-size: 18px; color: #333;">Location: {location_name}</h2>
-        <p style="margin: 0; color: #666; font-size: 14px;">No approved transactions were recorded for today.</p>
-      </div>
+    <div style="padding: 32px 24px;">
       
-      <div style="text-align: center; padding: 20px; background-color: #fff3cd; border-radius: 4px; border: 1px solid #ffc107;">
-        <p style="margin: 0; color: #856404; font-size: 15px;">
-          There are no approved logs to report for {today_str}.
+      <div style="background: linear-gradient(135deg, #fff3e0 0%, #ffe0b2 100%); padding: 32px 24px; border-radius: 12px; margin-bottom: 24px; border: 2px solid #ff9800; text-align: center;">
+        <div style="font-size: 64px; margin-bottom: 16px;">📭</div>
+        <h2 style="margin: 0 0 12px 0; font-size: 24px; color: #e65100;">No Data Available</h2>
+        <p style="margin: 0; color: #bf360c; font-size: 16px; line-height: 1.6;">
+          No approved transactions were recorded for today across your assigned locations.
         </p>
       </div>
+      
+      <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; border-left: 4px solid #667eea; margin-top: 20px;">
+        <p style="margin: 0; color: #666; font-size: 14px; line-height: 1.6;">
+          <strong>Locations Checked:</strong> {location_names}<br>
+          <strong>Status:</strong> No approved transactions found for {today_str}
+        </p>
+      </div>
+      
     </div>
     
     <div style="background-color: #f8f9fa; padding: 20px 24px; border-top: 1px solid #e9ecef; text-align: center;">
@@ -169,409 +177,6 @@ def generate_no_data_email_html(location_name: str, today_str: str, test_email: 
         Report generated on {datetime.now().strftime("%d/%m/%Y at %H:%M")}
       </p>
       {test_footer}
-    </div>
-    
-  </div>
-</body>
-</html>
-    """.strip()
-
-
-def generate_summary_report_html(summary_data: Dict[str, Any], today_str: str) -> str:
-    """Generate HTML summary report of email sending process"""
-    
-    success_count = summary_data['successCount']
-    failed_count = summary_data['failedCount']
-    skipped_count = summary_data['skippedCount']
-    total_count = summary_data['totalCount']
-    total_revenue = summary_data['totalRevenue']
-    total_records = summary_data['totalRecords']
-    
-    # Build results table
-    results_html = ""
-    for result in summary_data['results']:
-        status_color = 'green' if result['status'] == 'success' else 'red' if result['status'] == 'failed' else 'orange'
-        status_symbol = '✓' if result['status'] == 'success' else '✗' if result['status'] == 'failed' else '⊘'
-        
-        results_html += f"""
-        <tr>
-            <td style="padding: 10px; border-bottom: 1px solid #ddd; color: {status_color};">{status_symbol} {result['status'].upper()}</td>
-            <td style="padding: 10px; border-bottom: 1px solid #ddd;">{result['owner']}</td>
-            <td style="padding: 10px; border-bottom: 1px solid #ddd;">{result['email']}</td>
-            <td style="padding: 10px; border-bottom: 1px solid #ddd; text-align: center;">{result.get('recordCount', 'N/A')}</td>
-            <td style="padding: 10px; border-bottom: 1px solid #ddd; text-align: right;">₹{result.get('revenue', 0):,}</td>
-            <td style="padding: 10px; border-bottom: 1px solid #ddd;">{result.get('locations', 'N/A')}</td>
-            <td style="padding: 10px; border-bottom: 1px solid #ddd;">{result.get('templateUsed', 'N/A')}</td>
-            <td style="padding: 10px; border-bottom: 1px solid #ddd;">{result.get('error', 'N/A')}</td>
-        </tr>
-        """
-    
-    return f"""
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Daily Reports Summary</title>
-</head>
-<body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f5f5f5;">
-  <div style="max-width: 1000px; margin: 40px auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
-    
-    <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 32px 24px; text-align: center;">
-      <h1 style="margin: 0; font-size: 28px; font-weight: 600;">Daily Reports Summary</h1>
-      <p style="margin: 8px 0 0 0; font-size: 14px; opacity: 0.9;">{today_str}</p>
-    </div>
-    
-    <div style="padding: 40px 24px;">
-      
-      <!-- Stats Overview -->
-      <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 20px; margin-bottom: 30px;">
-        <div style="background: #e8f5e9; border-left: 4px solid #4caf50; padding: 20px; border-radius: 4px;">
-          <h3 style="margin: 0; color: #2e7d32; font-size: 24px;">{success_count}</h3>
-          <p style="margin: 5px 0 0 0; color: #558b2f; font-size: 14px;">Successful</p>
-        </div>
-        <div style="background: #ffebee; border-left: 4px solid #f44336; padding: 20px; border-radius: 4px;">
-          <h3 style="margin: 0; color: #c62828; font-size: 24px;">{failed_count}</h3>
-          <p style="margin: 5px 0 0 0; color: #d32f2f; font-size: 14px;">Failed</p>
-        </div>
-        <div style="background: #fff3e0; border-left: 4px solid #ff9800; padding: 20px; border-radius: 4px;">
-          <h3 style="margin: 0; color: #e65100; font-size: 24px;">{skipped_count}</h3>
-          <p style="margin: 5px 0 0 0; color: #ef6c00; font-size: 14px;">Skipped</p>
-        </div>
-        <div style="background: #f3e5f5; border-left: 4px solid #9c27b0; padding: 20px; border-radius: 4px;">
-          <h3 style="margin: 0; color: #6a1b9a; font-size: 24px;">{total_count}</h3>
-          <p style="margin: 5px 0 0 0; color: #7b1fa2; font-size: 14px;">Total Owners</p>
-        </div>
-      </div>
-      
-      <!-- Revenue Summary -->
-      <div style="background-color: #f8f9fa; border: 1px solid #dee2e6; padding: 20px; border-radius: 4px; margin-bottom: 30px;">
-        <h2 style="margin: 0 0 15px 0; font-size: 18px; color: #333;">Revenue Summary</h2>
-        <p style="margin: 5px 0; color: #666; font-size: 14px;">Total Revenue: <strong style="font-size: 20px; color: #2e7d32;">₹{total_revenue:,}</strong></p>
-        <p style="margin: 5px 0; color: #666; font-size: 14px;">Total Records: <strong>{total_records}</strong></p>
-      </div>
-      
-      <!-- Results Table -->
-      <h2 style="margin: 30px 0 15px 0; font-size: 18px; color: #333;">Detailed Results</h2>
-      <table style="width: 100%; border-collapse: collapse; border: 1px solid #ddd;">
-        <thead>
-          <tr style="background-color: #f5f5f5;">
-            <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd; font-weight: 600;">Status</th>
-            <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd; font-weight: 600;">Owner</th>
-            <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd; font-weight: 600;">Email</th>
-            <th style="padding: 12px; text-align: center; border-bottom: 2px solid #ddd; font-weight: 600;">Records</th>
-            <th style="padding: 12px; text-align: right; border-bottom: 2px solid #ddd; font-weight: 600;">Revenue</th>
-            <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd; font-weight: 600;">Locations</th>
-            <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd; font-weight: 600;">Template</th>
-            <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd; font-weight: 600;">Error</th>
-          </tr>
-        </thead>
-        <tbody>
-          {results_html}
-        </tbody>
-      </table>
-      
-    </div>
-    
-    <div style="background-color: #f8f9fa; padding: 20px 24px; border-top: 1px solid #e9ecef; text-align: center;">
-      <p style="margin: 0; color: #6c757d; font-size: 12px;">
-        Report generated on {datetime.now().strftime("%d/%m/%Y at %H:%M")}
-      </p>
-    </div>
-    
-  </div>
-</body>
-</html>
-    """.strip()
-
-
-def generate_multi_location_report_html(
-    location_data: Dict[str, Dict[str, Any]], 
-    locations: List[Dict[str, Any]],
-    today_str: str,
-    template_no: int
-) -> MIMEMultipart:
-    """
-    Generate comprehensive multi-location report with consolidated summary.
-    
-    Args:
-        location_data: Dict mapping location_id to {analysis, logs, location_name}
-        locations: All locations data
-        today_str: Date string
-        template_no: Template number to use
-    """
-    # Calculate consolidated totals
-    total_revenue = sum(data['analysis']['totalRevenue'] for data in location_data.values())
-    total_vehicles = sum(data['analysis']['totalVehicles'] for data in location_data.values())
-    total_locations = len(location_data)
-    avg_per_location = total_revenue / total_locations if total_locations > 0 else 0
-    
-    # Build location sections HTML
-    location_sections = []
-    
-    for location_id, data in location_data.items():
-        analysis = data['analysis']
-        location_name = data['location_name']
-        
-        # Payment breakdown for this location
-        payment_rows = ""
-        for item in analysis['paymentModeBreakdown']:
-            upi_details = ""
-            if item['mode'].lower() == 'upi' and item.get('upiAccounts'):
-                upi_list = "<ul style='margin: 4px 0; padding-left: 20px;'>"
-                for account_name, account_data in item['upiAccounts'].items():
-                    upi_list += f"<li style='font-size: 13px;'>{account_name}: ₹{account_data['amount']:,} ({account_data['count']} vehicles)</li>"
-                upi_list += "</ul>"
-                upi_details = f"""
-                <tr>
-                  <td colspan="4" style="padding: 8px 12px; background-color: #f8f9fa; border-bottom: 1px solid #e9ecef;">
-                    <strong style="color: #495057;">UPI Accounts:</strong>
-                    {upi_list}
-                  </td>
-                </tr>
-                """
-            
-            payment_rows += f"""
-            <tr>
-              <td style="padding: 10px; border-bottom: 1px solid #e9ecef;">{item['mode']}</td>
-              <td style="padding: 10px; border-bottom: 1px solid #e9ecef; text-align: right; font-weight: 600;">₹{item['revenue']:,}</td>
-              <td style="padding: 10px; border-bottom: 1px solid #e9ecef; text-align: center;">{item['count']}</td>
-              <td style="padding: 10px; border-bottom: 1px solid #e9ecef; text-align: right;">{item['percentage']:.1f}%</td>
-            </tr>
-            {upi_details}
-            """
-        
-        # Service breakdown
-        service_rows = ""
-        for item in analysis['serviceBreakdown']:
-            service_rows += f"""
-            <tr>
-              <td style="padding: 10px; border-bottom: 1px solid #e9ecef;">{item['service']}</td>
-              <td style="padding: 10px; border-bottom: 1px solid #e9ecef; text-align: center;">{item['count']}</td>
-              <td style="padding: 10px; border-bottom: 1px solid #e9ecef; text-align: right; font-weight: 600;">₹{item['revenue']:,}</td>
-              <td style="padding: 10px; border-bottom: 1px solid #e9ecef; text-align: right;">₹{round(item['price'])}</td>
-            </tr>
-            """
-        
-        # Vehicle distribution
-        vehicle_rows = ""
-        for item in analysis['vehicleDistribution']:
-            vehicle_rows += f"""
-            <tr>
-              <td style="padding: 10px; border-bottom: 1px solid #e9ecef;">{item['type']}</td>
-              <td style="padding: 10px; border-bottom: 1px solid #e9ecef; text-align: center;">{item['count']}</td>
-              <td style="padding: 10px; border-bottom: 1px solid #e9ecef; text-align: right;">{item['percentage']:.1f}%</td>
-            </tr>
-            """
-        
-        # Hourly breakdown
-        hourly_rows = ""
-        for item in analysis['hourlyBreakdown']:
-            hourly_rows += f"""
-            <tr>
-              <td style="padding: 10px; border-bottom: 1px solid #e9ecef;">{item['display']}</td>
-              <td style="padding: 10px; border-bottom: 1px solid #e9ecef; text-align: center;">{item['count']}</td>
-              <td style="padding: 10px; border-bottom: 1px solid #e9ecef; text-align: right; font-weight: 600;">₹{item['amount']:,}</td>
-            </tr>
-            """
-        
-        # Build this location's section
-        location_section = f"""
-        <!-- Location: {location_name} -->
-        <div style="margin-bottom: 40px; border: 2px solid #667eea; border-radius: 12px; overflow: hidden; background: white;">
-            
-            <!-- Location Header -->
-            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 24px; text-align: center;">
-                <h2 style="margin: 0; font-size: 26px; font-weight: 600;">📍 {location_name}</h2>
-                <p style="margin: 8px 0 0 0; font-size: 14px; opacity: 0.9;">Location Performance Report</p>
-            </div>
-            
-            <div style="padding: 24px;">
-                
-                <!-- Location Summary Cards -->
-                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 24px;">
-                    <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 16px; border-radius: 8px; text-align: center;">
-                        <p style="margin: 0; font-size: 12px; opacity: 0.9; text-transform: uppercase;">Revenue</p>
-                        <h3 style="margin: 6px 0 0 0; font-size: 24px; font-weight: 700;">₹{analysis['totalRevenue']:,}</h3>
-                    </div>
-                    <div style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; padding: 16px; border-radius: 8px; text-align: center;">
-                        <p style="margin: 0; font-size: 12px; opacity: 0.9; text-transform: uppercase;">Vehicles</p>
-                        <h3 style="margin: 6px 0 0 0; font-size: 24px; font-weight: 700;">{analysis['totalVehicles']}</h3>
-                    </div>
-                    <div style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); color: white; padding: 16px; border-radius: 8px; text-align: center;">
-                        <p style="margin: 0; font-size: 12px; opacity: 0.9; text-transform: uppercase;">Avg Service</p>
-                        <h3 style="margin: 6px 0 0 0; font-size: 24px; font-weight: 700;">₹{round(analysis['avgService'])}</h3>
-                    </div>
-                </div>
-                
-                <!-- Payment Breakdown -->
-                <div style="margin-bottom: 24px;">
-                    <h3 style="color: #333; font-size: 18px; margin: 0 0 12px 0; border-bottom: 2px solid #667eea; padding-bottom: 6px;">💳 Payment Breakdown</h3>
-                    <table style="width: 100%; border-collapse: collapse; background-color: #fff; border-radius: 8px; overflow: hidden;">
-                        <thead>
-                            <tr style="background-color: #667eea; color: white;">
-                                <th style="padding: 10px; text-align: left; font-weight: 600; font-size: 13px;">Mode</th>
-                                <th style="padding: 10px; text-align: right; font-weight: 600; font-size: 13px;">Revenue</th>
-                                <th style="padding: 10px; text-align: center; font-weight: 600; font-size: 13px;">Count</th>
-                                <th style="padding: 10px; text-align: right; font-weight: 600; font-size: 13px;">%</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {payment_rows}
-                        </tbody>
-                    </table>
-                </div>
-                
-                <!-- Service Breakdown -->
-                <div style="margin-bottom: 24px;">
-                    <h3 style="color: #333; font-size: 18px; margin: 0 0 12px 0; border-bottom: 2px solid #f093fb; padding-bottom: 6px;">🛠️ Service Breakdown</h3>
-                    <table style="width: 100%; border-collapse: collapse; background-color: #fff; border-radius: 8px; overflow: hidden;">
-                        <thead>
-                            <tr style="background-color: #f093fb; color: white;">
-                                <th style="padding: 10px; text-align: left; font-weight: 600; font-size: 13px;">Service</th>
-                                <th style="padding: 10px; text-align: center; font-weight: 600; font-size: 13px;">Count</th>
-                                <th style="padding: 10px; text-align: right; font-weight: 600; font-size: 13px;">Revenue</th>
-                                <th style="padding: 10px; text-align: right; font-weight: 600; font-size: 13px;">Avg Price</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {service_rows}
-                        </tbody>
-                    </table>
-                </div>
-                
-                <!-- Two Column Layout -->
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
-                    
-                    <!-- Vehicle Distribution -->
-                    <div>
-                        <h3 style="color: #333; font-size: 18px; margin: 0 0 12px 0; border-bottom: 2px solid #4facfe; padding-bottom: 6px;">🚗 Vehicles</h3>
-                        <table style="width: 100%; border-collapse: collapse; background-color: #fff; border-radius: 8px; overflow: hidden;">
-                            <thead>
-                                <tr style="background-color: #4facfe; color: white;">
-                                    <th style="padding: 10px; text-align: left; font-weight: 600; font-size: 13px;">Type</th>
-                                    <th style="padding: 10px; text-align: center; font-weight: 600; font-size: 13px;">Count</th>
-                                    <th style="padding: 10px; text-align: right; font-weight: 600; font-size: 13px;">%</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {vehicle_rows}
-                            </tbody>
-                        </table>
-                    </div>
-                    
-                    <!-- Hourly Performance -->
-                    <div>
-                        <h3 style="color: #333; font-size: 18px; margin: 0 0 12px 0; border-bottom: 2px solid #43e97b; padding-bottom: 6px;">⏰ Hourly</h3>
-                        <table style="width: 100%; border-collapse: collapse; background-color: #fff; border-radius: 8px; overflow: hidden;">
-                            <thead>
-                                <tr style="background-color: #43e97b; color: white;">
-                                    <th style="padding: 10px; text-align: left; font-weight: 600; font-size: 13px;">Time</th>
-                                    <th style="padding: 10px; text-align: center; font-weight: 600; font-size: 13px;">Count</th>
-                                    <th style="padding: 10px; text-align: right; font-weight: 600; font-size: 13px;">Revenue</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {hourly_rows}
-                            </tbody>
-                        </table>
-                    </div>
-                    
-                </div>
-                
-            </div>
-        </div>
-        """
-        
-        location_sections.append(location_section)
-    
-    # Build complete HTML
-    html = f"""
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Multi-Location Business Report</title>
-</head>
-<body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f5f5f5;">
-  <div style="max-width: 900px; margin: 40px auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
-    
-    <!-- Main Header -->
-    <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 32px 24px; text-align: center;">
-      <h1 style="margin: 0; font-size: 32px; font-weight: 600;">📊 Multi-Location Business Report</h1>
-      <p style="margin: 8px 0 0 0; font-size: 16px; opacity: 0.9;">{today_str}</p>
-      <p style="margin: 4px 0 0 0; font-size: 14px; opacity: 0.8;">🏢 {total_locations} Locations</p>
-    </div>
-    
-    <div style="padding: 32px 24px;">
-      
-      <!-- Consolidated Summary -->
-      <div style="background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%); padding: 24px; border-radius: 12px; margin-bottom: 32px; border: 2px solid #4caf50;">
-        <h2 style="margin: 0 0 16px 0; font-size: 22px; color: #2e7d32; text-align: center;">📈 Consolidated Summary</h2>
-        
-        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px;">
-          <div style="background: white; padding: 16px; border-radius: 8px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-            <p style="margin: 0; font-size: 12px; color: #666; text-transform: uppercase;">Total Revenue</p>
-            <h3 style="margin: 6px 0 0 0; font-size: 26px; font-weight: 700; color: #2e7d32;">₹{total_revenue:,}</h3>
-          </div>
-          <div style="background: white; padding: 16px; border-radius: 8px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-            <p style="margin: 0; font-size: 12px; color: #666; text-transform: uppercase;">Total Vehicles</p>
-            <h3 style="margin: 6px 0 0 0; font-size: 26px; font-weight: 700; color: #2e7d32;">{total_vehicles}</h3>
-          </div>
-          <div style="background: white; padding: 16px; border-radius: 8px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-            <p style="margin: 0; font-size: 12px; color: #666; text-transform: uppercase;">Locations</p>
-            <h3 style="margin: 6px 0 0 0; font-size: 26px; font-weight: 700; color: #2e7d32;">{total_locations}</h3>
-          </div>
-          <div style="background: white; padding: 16px; border-radius: 8px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-            <p style="margin: 0; font-size: 12px; color: #666; text-transform: uppercase;">Avg/Location</p>
-            <h3 style="margin: 6px 0 0 0; font-size: 26px; font-weight: 700; color: #2e7d32;">₹{round(avg_per_location):,}</h3>
-          </div>
-        </div>
-        
-        <!-- Location Performance Comparison -->
-        <div style="margin-top: 20px; background: white; padding: 16px; border-radius: 8px;">
-          <h3 style="margin: 0 0 12px 0; font-size: 16px; color: #333;">Location Performance Comparison</h3>
-          <table style="width: 100%; border-collapse: collapse;">
-            <thead>
-              <tr style="background-color: #f5f5f5;">
-                <th style="padding: 8px; text-align: left; font-size: 12px; border-bottom: 1px solid #ddd;">Location</th>
-                <th style="padding: 8px; text-align: right; font-size: 12px; border-bottom: 1px solid #ddd;">Revenue</th>
-                <th style="padding: 8px; text-align: center; font-size: 12px; border-bottom: 1px solid #ddd;">Vehicles</th>
-                <th style="padding: 8px; text-align: right; font-size: 12px; border-bottom: 1px solid #ddd;">% of Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              {''.join(f"""
-              <tr>
-                <td style="padding: 8px; border-bottom: 1px solid #e9ecef; font-size: 13px;">{data['location_name']}</td>
-                <td style="padding: 8px; border-bottom: 1px solid #e9ecef; text-align: right; font-weight: 600; font-size: 13px;">₹{data['analysis']['totalRevenue']:,}</td>
-                <td style="padding: 8px; border-bottom: 1px solid #e9ecef; text-align: center; font-size: 13px;">{data['analysis']['totalVehicles']}</td>
-                <td style="padding: 8px; border-bottom: 1px solid #e9ecef; text-align: right; font-size: 13px;">{(data['analysis']['totalRevenue']/total_revenue*100):.1f}%</td>
-              </tr>
-              """ for data in location_data.values())}
-            </tbody>
-          </table>
-        </div>
-      </div>
-      
-      <!-- Individual Location Reports -->
-      <h2 style="color: #333; font-size: 24px; margin: 0 0 20px 0; text-align: center; border-bottom: 2px solid #667eea; padding-bottom: 12px;">📍 Location-wise Detailed Reports</h2>
-      
-      {''.join(location_sections)}
-      
-      <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; border-left: 4px solid #667eea; margin-top: 20px;">
-        <p style="margin: 0; color: #666; font-size: 14px;">
-          🔎 This email includes separate CSV attachments for each location with detailed transaction data, payment breakdowns, and service analysis.
-        </p>
-      </div>
-      
-    </div>
-    
-    <div style="background-color: #f8f9fa; padding: 20px 24px; border-top: 1px solid #e9ecef; text-align: center;">
-      <p style="margin: 0; color: #6c757d; font-size: 12px;">
-        Report generated on {datetime.now().strftime("%d/%m/%Y at %H:%M")}
-      </p>
     </div>
     
   </div>
@@ -888,6 +493,340 @@ def generate_email_html(analysis: Dict[str, Any], location_name: str, today_str:
     return msg
 
 
+def generate_multi_location_report_html(location_data: Dict[str, Dict[str, Any]], 
+                                       locations: List[Dict[str, Any]], 
+                                       today_str: str, 
+                                       template_no: int) -> MIMEMultipart:
+    """Generate multi-location report HTML"""
+    
+    # Calculate totals
+    total_revenue = sum(data['analysis']['totalRevenue'] for data in location_data.values())
+    total_vehicles = sum(data['analysis']['totalVehicles'] for data in location_data.values())
+    total_locations = len(location_data)
+    avg_per_location = total_revenue / total_locations if total_locations > 0 else 0
+    
+    # Generate location comparison table rows
+    location_rows = ""
+    for data in location_data.values():
+        location_rows += f"""
+              <tr>
+                <td style="padding: 8px; border-bottom: 1px solid #e9ecef; font-size: 13px;">{data['location_name']}</td>
+                <td style="padding: 8px; border-bottom: 1px solid #e9ecef; text-align: right; font-weight: 600; font-size: 13px;">₹{data['analysis']['totalRevenue']:,}</td>
+                <td style="padding: 8px; border-bottom: 1px solid #e9ecef; text-align: center; font-size: 13px;">{data['analysis']['totalVehicles']}</td>
+                <td style="padding: 8px; border-bottom: 1px solid #e9ecef; text-align: right; font-size: 13px;">{(data['analysis']['totalRevenue']/total_revenue*100):.1f}%</td>
+              </tr>
+              """
+    
+    # Generate individual location sections using template functions
+    location_sections = []
+    for location_id, data in location_data.items():
+        analysis = data['analysis']
+        location_name = data['location_name']
+        
+        # Use the appropriate template for each location
+        if template_no == 3:
+            location_html = generate_template3_html(analysis, location_name, today_str)
+            # Extract HTML from MIMEMultipart if needed
+            if isinstance(location_html, MIMEMultipart):
+                # For multi-location, we'll create a simplified section
+                location_sections.append(f"""
+        <div style="margin-bottom: 32px; padding: 24px; background: #f8f9fa; border-radius: 8px; border-left: 4px solid #667eea;">
+          <h3 style="margin: 0 0 16px 0; font-size: 20px; color: #333;">📍 {location_name}</h3>
+          <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px;">
+            <div style="background: white; padding: 16px; border-radius: 8px; text-align: center;">
+              <p style="margin: 0; font-size: 12px; color: #666;">Total Revenue</p>
+              <h4 style="margin: 8px 0 0 0; font-size: 24px; font-weight: 700; color: #667eea;">₹{analysis['totalRevenue']:,}</h4>
+            </div>
+            <div style="background: white; padding: 16px; border-radius: 8px; text-align: center;">
+              <p style="margin: 0; font-size: 12px; color: #666;">Vehicles</p>
+              <h4 style="margin: 8px 0 0 0; font-size: 24px; font-weight: 700; color: #f093fb;">{analysis['totalVehicles']}</h4>
+            </div>
+            <div style="background: white; padding: 16px; border-radius: 8px; text-align: center;">
+              <p style="margin: 0; font-size: 12px; color: #666;">Avg Service</p>
+              <h4 style="margin: 8px 0 0 0; font-size: 24px; font-weight: 700; color: #4facfe;">₹{round(analysis['avgService'])}</h4>
+            </div>
+          </div>
+        </div>
+                """)
+            else:
+                location_sections.append(location_html)
+        elif template_no == 2:
+            location_html = generate_template2_html(analysis, location_name, today_str)
+            # Simplified section for multi-location
+            location_sections.append(f"""
+        <div style="margin-bottom: 32px; padding: 24px; background: #f8f9fa; border-radius: 8px; border-left: 4px solid #667eea;">
+          <h3 style="margin: 0 0 16px 0; font-size: 20px; color: #333;">📍 {location_name}</h3>
+          <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px;">
+            <div style="background: white; padding: 16px; border-radius: 8px; text-align: center;">
+              <p style="margin: 0; font-size: 12px; color: #666;">Total Revenue</p>
+              <h4 style="margin: 8px 0 0 0; font-size: 24px; font-weight: 700; color: #667eea;">₹{analysis['totalRevenue']:,}</h4>
+            </div>
+            <div style="background: white; padding: 16px; border-radius: 8px; text-align: center;">
+              <p style="margin: 0; font-size: 12px; color: #666;">Vehicles</p>
+              <h4 style="margin: 8px 0 0 0; font-size: 24px; font-weight: 700; color: #f093fb;">{analysis['totalVehicles']}</h4>
+            </div>
+            <div style="background: white; padding: 16px; border-radius: 8px; text-align: center;">
+              <p style="margin: 0; font-size: 12px; color: #666;">Avg Service</p>
+              <h4 style="margin: 8px 0 0 0; font-size: 24px; font-weight: 700; color: #4facfe;">₹{round(analysis['avgService'])}</h4>
+            </div>
+          </div>
+        </div>
+                """)
+        else:
+            # Template 1 - use the HTML string directly
+            location_html_str = generate_template1_html(analysis, location_name, today_str)
+            # Extract just the content section from template1
+            location_sections.append(f"""
+        <div style="margin-bottom: 32px; padding: 24px; background: #f8f9fa; border-radius: 8px; border-left: 4px solid #667eea;">
+          <h3 style="margin: 0 0 16px 0; font-size: 20px; color: #333;">📍 {location_name}</h3>
+          <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px;">
+            <div style="background: white; padding: 16px; border-radius: 8px; text-align: center;">
+              <p style="margin: 0; font-size: 12px; color: #666;">Total Revenue</p>
+              <h4 style="margin: 8px 0 0 0; font-size: 24px; font-weight: 700; color: #667eea;">₹{analysis['totalRevenue']:,}</h4>
+            </div>
+            <div style="background: white; padding: 16px; border-radius: 8px; text-align: center;">
+              <p style="margin: 0; font-size: 12px; color: #666;">Vehicles</p>
+              <h4 style="margin: 8px 0 0 0; font-size: 24px; font-weight: 700; color: #f093fb;">{analysis['totalVehicles']}</h4>
+            </div>
+            <div style="background: white; padding: 16px; border-radius: 8px; text-align: center;">
+              <p style="margin: 0; font-size: 12px; color: #666;">Avg Service</p>
+              <h4 style="margin: 8px 0 0 0; font-size: 24px; font-weight: 700; color: #4facfe;">₹{round(analysis['avgService'])}</h4>
+            </div>
+          </div>
+        </div>
+                """)
+    
+    location_sections_html = ''.join(location_sections)
+    
+    html = f"""
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Multi-Location Business Report</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f5f5f5;">
+  <div style="max-width: 900px; margin: 40px auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+    
+    <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 32px 24px; text-align: center;">
+      <h1 style="margin: 0; font-size: 32px; font-weight: 600;">📊 Multi-Location Business Report</h1>
+      <p style="margin: 8px 0 0 0; font-size: 16px; opacity: 0.9;">{today_str}</p>
+      <p style="margin: 4px 0 0 0; font-size: 14px; opacity: 0.8;">🏢 {total_locations} Locations</p>
+    </div>
+    
+    <div style="padding: 32px 24px;">
+      
+      <!-- Consolidated Summary -->
+      <div style="background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%); padding: 24px; border-radius: 12px; margin-bottom: 32px; border: 2px solid #4caf50;">
+        <h2 style="margin: 0 0 16px 0; font-size: 22px; color: #2e7d32; text-align: center;">📈 Consolidated Summary</h2>
+        
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px;">
+          <div style="background: white; padding: 16px; border-radius: 8px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+            <p style="margin: 0; font-size: 12px; color: #666; text-transform: uppercase;">Total Revenue</p>
+            <h3 style="margin: 6px 0 0 0; font-size: 26px; font-weight: 700; color: #2e7d32;">₹{total_revenue:,}</h3>
+          </div>
+          <div style="background: white; padding: 16px; border-radius: 8px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+            <p style="margin: 0; font-size: 12px; color: #666; text-transform: uppercase;">Total Vehicles</p>
+            <h3 style="margin: 6px 0 0 0; font-size: 26px; font-weight: 700; color: #2e7d32;">{total_vehicles}</h3>
+          </div>
+          <div style="background: white; padding: 16px; border-radius: 8px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+            <p style="margin: 0; font-size: 12px; color: #666; text-transform: uppercase;">Locations</p>
+            <h3 style="margin: 6px 0 0 0; font-size: 26px; font-weight: 700; color: #2e7d32;">{total_locations}</h3>
+          </div>
+          <div style="background: white; padding: 16px; border-radius: 8px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+            <p style="margin: 0; font-size: 12px; color: #666; text-transform: uppercase;">Avg/Location</p>
+            <h3 style="margin: 6px 0 0 0; font-size: 26px; font-weight: 700; color: #2e7d32;">₹{round(avg_per_location):,}</h3>
+          </div>
+        </div>
+        
+        <!-- Location Performance Comparison -->
+        <div style="margin-top: 20px; background: white; padding: 16px; border-radius: 8px;">
+          <h3 style="margin: 0 0 12px 0; font-size: 16px; color: #333;">Location Performance Comparison</h3>
+          <table style="width: 100%; border-collapse: collapse;">
+            <thead>
+              <tr style="background-color: #f5f5f5;">
+                <th style="padding: 8px; text-align: left; font-size: 12px; border-bottom: 1px solid #ddd;">Location</th>
+                <th style="padding: 8px; text-align: right; font-size: 12px; border-bottom: 1px solid #ddd;">Revenue</th>
+                <th style="padding: 8px; text-align: center; font-size: 12px; border-bottom: 1px solid #ddd;">Vehicles</th>
+                <th style="padding: 8px; text-align: right; font-size: 12px; border-bottom: 1px solid #ddd;">% of Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {location_rows}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      
+      <!-- Individual Location Reports -->
+      <h2 style="color: #333; font-size: 24px; margin: 0 0 20px 0; text-align: center; border-bottom: 2px solid #667eea; padding-bottom: 12px;">📍 Location-wise Detailed Reports</h2>
+      
+      {location_sections_html}
+      
+      <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; border-left: 4px solid #667eea; margin-top: 20px;">
+        <p style="margin: 0; color: #666; font-size: 14px;">
+          🔎 This email includes separate CSV attachments for each location with detailed transaction data, payment breakdowns, and service analysis.
+        </p>
+      </div>
+      
+    </div>
+    
+    <div style="background-color: #f8f9fa; padding: 20px 24px; border-top: 1px solid #e9ecef; text-align: center;">
+      <p style="margin: 0; color: #6c757d; font-size: 12px;">
+        Report generated on {datetime.now().strftime("%d/%m/%Y at %H:%M")}
+      </p>
+    </div>
+    
+  </div>
+</body>
+</html>
+    """.strip()
+    
+    msg = MIMEMultipart('related')
+    msg.attach(MIMEText(html, 'html', 'utf-8'))
+    return msg
+
+
+def generate_summary_report_html(summary_data: Dict[str, Any], today_str: str) -> str:
+    """Generate HTML for admin summary report"""
+    
+    success_count = summary_data.get('successCount', 0)
+    failed_count = summary_data.get('failedCount', 0)
+    skipped_count = summary_data.get('skippedCount', 0)
+    total_count = summary_data.get('totalCount', 0)
+    total_revenue = summary_data.get('totalRevenue', 0)
+    total_records = summary_data.get('totalRecords', 0)
+    results = summary_data.get('results', [])
+    
+    # Calculate success rate (avoid division by zero)
+    success_rate = (success_count/total_count*100) if total_count > 0 else 0.0
+    
+    # Generate results table rows
+    results_rows = ""
+    for result in results:
+        status_color = '#28a745' if result.get('status') == 'success' else '#dc3545' if result.get('status') == 'failed' else '#ffc107'
+        status_icon = '✅' if result.get('status') == 'success' else '❌' if result.get('status') == 'failed' else '⏭️'
+        
+        revenue = result.get('revenue', 0)
+        record_count = result.get('recordCount', 0)
+        locations = result.get('locations', 0)
+        template = result.get('templateUsed', 'N/A')
+        timezone = result.get('timezone', 'N/A')
+        
+        results_rows += f"""
+        <tr>
+          <td style="padding: 12px; border-bottom: 1px solid #e9ecef; font-size: 13px;">{result.get('owner', 'N/A')}</td>
+          <td style="padding: 12px; border-bottom: 1px solid #e9ecef; font-size: 13px;">{result.get('email', 'N/A')}</td>
+          <td style="padding: 12px; border-bottom: 1px solid #e9ecef; text-align: center; font-size: 13px;">
+            <span style="color: {status_color}; font-weight: 600;">{status_icon} {result.get('status', 'unknown').upper()}</span>
+          </td>
+          <td style="padding: 12px; border-bottom: 1px solid #e9ecef; text-align: right; font-size: 13px;">₹{revenue:,}</td>
+          <td style="padding: 12px; border-bottom: 1px solid #e9ecef; text-align: center; font-size: 13px;">{record_count}</td>
+          <td style="padding: 12px; border-bottom: 1px solid #e9ecef; text-align: center; font-size: 13px;">{locations}</td>
+          <td style="padding: 12px; border-bottom: 1px solid #e9ecef; text-align: center; font-size: 13px;">{template}</td>
+          <td style="padding: 12px; border-bottom: 1px solid #e9ecef; font-size: 13px;">{result.get('error', 'N/A')}</td>
+        </tr>
+        """
+    
+    return f"""
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Daily Reports Summary</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f5f5f5;">
+  <div style="max-width: 1200px; margin: 40px auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+    
+    <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 32px 24px; text-align: center;">
+      <h1 style="margin: 0; font-size: 32px; font-weight: 600;">📊 Daily Reports Summary</h1>
+      <p style="margin: 8px 0 0 0; font-size: 16px; opacity: 0.9;">{today_str}</p>
+    </div>
+    
+    <div style="padding: 32px 24px;">
+      
+      <!-- Summary Stats -->
+      <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 32px;">
+        <div style="background: linear-gradient(135deg, #28a745 0%, #20c997 100%); color: white; padding: 20px; border-radius: 8px; text-align: center;">
+          <p style="margin: 0; font-size: 13px; opacity: 0.9; text-transform: uppercase; letter-spacing: 0.5px;">Successful</p>
+          <h2 style="margin: 8px 0 0 0; font-size: 28px; font-weight: 700;">{success_count}</h2>
+        </div>
+        
+        <div style="background: linear-gradient(135deg, #dc3545 0%, #c82333 100%); color: white; padding: 20px; border-radius: 8px; text-align: center;">
+          <p style="margin: 0; font-size: 13px; opacity: 0.9; text-transform: uppercase; letter-spacing: 0.5px;">Failed</p>
+          <h2 style="margin: 8px 0 0 0; font-size: 28px; font-weight: 700;">{failed_count}</h2>
+        </div>
+        
+        <div style="background: linear-gradient(135deg, #ffc107 0%, #ff9800 100%); color: white; padding: 20px; border-radius: 8px; text-align: center;">
+          <p style="margin: 0; font-size: 13px; opacity: 0.9; text-transform: uppercase; letter-spacing: 0.5px;">Skipped</p>
+          <h2 style="margin: 8px 0 0 0; font-size: 28px; font-weight: 700;">{skipped_count}</h2>
+        </div>
+        
+        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 8px; text-align: center;">
+          <p style="margin: 0; font-size: 13px; opacity: 0.9; text-transform: uppercase; letter-spacing: 0.5px;">Total Revenue</p>
+          <h2 style="margin: 8px 0 0 0; font-size: 28px; font-weight: 700;">₹{total_revenue:,}</h2>
+        </div>
+      </div>
+      
+      <!-- Overall Stats -->
+      <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 32px;">
+        <h2 style="margin: 0 0 16px 0; font-size: 20px; color: #333;">Overall Statistics</h2>
+        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px;">
+          <div>
+            <p style="margin: 0; font-size: 12px; color: #666; text-transform: uppercase;">Total Users</p>
+            <p style="margin: 4px 0 0 0; font-size: 24px; font-weight: 700; color: #333;">{total_count}</p>
+          </div>
+          <div>
+            <p style="margin: 0; font-size: 12px; color: #666; text-transform: uppercase;">Total Records</p>
+            <p style="margin: 4px 0 0 0; font-size: 24px; font-weight: 700; color: #333;">{total_records:,}</p>
+          </div>
+          <div>
+            <p style="margin: 0; font-size: 12px; color: #666; text-transform: uppercase;">Success Rate</p>
+            <p style="margin: 4px 0 0 0; font-size: 24px; font-weight: 700; color: #333;">{success_rate:.1f}%</p>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Results Table -->
+      <div style="margin-bottom: 32px;">
+        <h2 style="color: #333; font-size: 20px; margin: 0 0 16px 0; border-bottom: 2px solid #667eea; padding-bottom: 8px;">📋 Detailed Results</h2>
+        <div style="overflow-x: auto;">
+          <table style="width: 100%; border-collapse: collapse; background-color: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+            <thead>
+              <tr style="background-color: #667eea; color: white;">
+                <th style="padding: 12px; text-align: left; font-weight: 600;">Owner</th>
+                <th style="padding: 12px; text-align: left; font-weight: 600;">Email</th>
+                <th style="padding: 12px; text-align: center; font-weight: 600;">Status</th>
+                <th style="padding: 12px; text-align: right; font-weight: 600;">Revenue</th>
+                <th style="padding: 12px; text-align: center; font-weight: 600;">Records</th>
+                <th style="padding: 12px; text-align: center; font-weight: 600;">Locations</th>
+                <th style="padding: 12px; text-align: center; font-weight: 600;">Template</th>
+                <th style="padding: 12px; text-align: left; font-weight: 600;">Error</th>
+              </tr>
+            </thead>
+            <tbody>
+              {results_rows}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      
+    </div>
+    
+    <div style="background-color: #f8f9fa; padding: 20px 24px; border-top: 1px solid #e9ecef; text-align: center;">
+      <p style="margin: 0; color: #6c757d; font-size: 12px;">
+        Report generated on {datetime.now().strftime("%d/%m/%Y at %H:%M")}
+      </p>
+    </div>
+    
+  </div>
+</body>
+</html>
+    """.strip()
+
+
 def send_email_with_attachments_ses(from_email: str, to_email: str, subject: str,
                                     html_content_or_msg, text_content: str,
                                     attachments: List[Dict[str, Any]]):
@@ -956,7 +895,7 @@ def send_email_with_attachments_ses(from_email: str, to_email: str, subject: str
 
 @app.route('/send-reports', methods=['POST'])
 def send_reports():
-    """Main endpoint to send daily reports"""
+    """Main endpoint to send daily reports - now with scheduling support"""
     
     auth_header = request.headers.get('Authorization')
     if not auth_header or not auth_header.startswith('Bearer '):
@@ -984,12 +923,20 @@ def send_reports():
     try:
         logger.info("Starting daily reports generation...")
         
+        # Get request body for scheduled users
+        request_data = request.get_json() or {}
+        scheduled_users = request_data.get('users', [])
+        trigger_source = request_data.get('trigger', 'manual')
+        
+        logger.info(f"Trigger source: {trigger_source}")
+        logger.info(f"Scheduled users count: {len(scheduled_users)}")
+        
         test_email = TEST_EMAIL
         
         if test_email:
             logger.info(f"TEST MODE ENABLED: Will send to {test_email} only")
         else:
-            logger.info("PRODUCTION MODE: Will send to all owners")
+            logger.info("PRODUCTION MODE: Will send to scheduled users")
         
         # Validate environment variables
         required_vars = ['AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'SES_VERIFIED_FROM']
@@ -1024,11 +971,32 @@ def send_reports():
         
         logger.info(f"Found {len(locations)} locations")
         
-        # Fetch ALL owners (not just test mode)
-        response = supabase.table('users').select('id,email,assigned_location,role,first_name,last_name,templateno').eq('role', 'owner').execute()
-        owners = response.data
+        # Fetch owners based on scheduled users
+        if scheduled_users:
+            # Get only the scheduled users
+            user_ids = [user['user_id'] for user in scheduled_users]
+            logger.info(f"Fetching scheduled users: {user_ids}")
+            
+            response = supabase.table('users').select('id,email,assigned_location,role,first_name,last_name,templateno').in_('id', user_ids).eq('role', 'owner').execute()
+            owners = response.data
+            
+            # Merge template info from scheduled_users
+            for owner in owners:
+                scheduled_user = next((u for u in scheduled_users if u['user_id'] == owner['id']), None)
+                if scheduled_user:
+                    owner['timezone'] = scheduled_user.get('timezone', 'UTC')
+                    # Prioritize templateno from user_schedules if available
+                    if scheduled_user.get('templateno'):
+                        owner['templateno'] = scheduled_user['templateno']
+        else:
+            # Fallback: fetch all owners (backward compatibility)
+            response = supabase.table('users').select('id,email,assigned_location,role,first_name,last_name,templateno').eq('role', 'owner').execute()
+            owners = response.data
+            # Set default timezone for all
+            for owner in owners:
+                owner['timezone'] = 'UTC'
         
-        logger.info(f"Found {len(owners) if owners else 0} owners in database")
+        logger.info(f"Found {len(owners) if owners else 0} owners to process")
         
         # Verify SES connection
         try:
@@ -1055,7 +1023,8 @@ def send_reports():
                     'owner': get_owner_display_name(owner),
                     'email': owner.get('email', 'No email'),
                     'status': 'skipped',
-                    'reason': 'No email address'
+                    'reason': 'No email address',
+                    'timezone': owner.get('timezone', 'N/A')
                 })
                 continue
             
@@ -1069,14 +1038,16 @@ def send_reports():
                     'owner': get_owner_display_name(owner),
                     'email': owner['email'],
                     'status': 'skipped',
-                    'reason': 'No locations assigned'
+                    'reason': 'No locations assigned',
+                    'timezone': owner.get('timezone', 'N/A')
                 })
                 continue
             
             owner_template_no = owner.get('templateno', 1) or 1
+            owner_timezone = owner.get('timezone', 'UTC')
             is_multi_location = len(owner_location_ids) > 1
             
-            logger.info(f"Processing owner {owner['email']} - {len(owner_location_ids)} location(s), Template {owner_template_no}")
+            logger.info(f"Processing owner {owner['email']} - {len(owner_location_ids)} location(s), Template {owner_template_no}, Timezone: {owner_timezone}")
             
             # Fetch data for each location
             location_data = {}
@@ -1124,6 +1095,7 @@ def send_reports():
 
 Locations: {location_names}
 Status: No approved transactions recorded for today across all assigned locations.
+Timezone: {owner_timezone}
 
 Generated on: {datetime.now().strftime("%d/%m/%Y at %H:%M")}"""
                     
@@ -1145,7 +1117,8 @@ Generated on: {datetime.now().strftime("%d/%m/%Y at %H:%M")}"""
                         'revenue': 0,
                         'locations': len(owner_location_ids),
                         'emailType': 'no-data',
-                        'templateUsed': owner_template_no
+                        'templateUsed': owner_template_no,
+                        'timezone': owner_timezone
                     })
                 except Exception as e:
                     logger.error(f"Failed to send no-data email to {owner['email']}: {e}")
@@ -1155,7 +1128,8 @@ Generated on: {datetime.now().strftime("%d/%m/%Y at %H:%M")}"""
                         'email': owner['email'],
                         'status': 'failed',
                         'error': str(e),
-                        'templateUsed': owner_template_no
+                        'templateUsed': owner_template_no,
+                        'timezone': owner_timezone
                     })
                 continue
             
@@ -1214,6 +1188,7 @@ Generated on: {datetime.now().strftime("%d/%m/%Y at %H:%M")}"""
 Total Locations: {len(location_data)}
 Total Revenue: ₹{total_revenue_owner:,}
 Total Transactions: {total_records_owner}
+Timezone: {owner_timezone}
 
 LOCATION BREAKDOWN:
 {chr(10).join(f"{data['location_name']}: ₹{data['analysis']['totalRevenue']:,} ({data['analysis']['totalVehicles']} vehicles)" for data in location_data.values())}
@@ -1235,7 +1210,7 @@ Generated on: {datetime.now().strftime("%d/%m/%Y at %H:%M")}"""
                 total_revenue_summary += total_revenue_owner
                 total_records_summary += total_records_owner
                 
-                logger.info(f"Email sent to {owner['email']} ({len(location_data)} location(s), {total_records_owner} records, ₹{total_revenue_owner:,}, Template {owner_template_no})")
+                logger.info(f"Email sent to {owner['email']} ({len(location_data)} location(s), {total_records_owner} records, ₹{total_revenue_owner:,}, Template {owner_template_no}, TZ: {owner_timezone})")
                 
                 email_results.append({
                     'owner': get_owner_display_name(owner),
@@ -1247,6 +1222,7 @@ Generated on: {datetime.now().strftime("%d/%m/%Y at %H:%M")}"""
                     'locationNames': ', '.join([d['location_name'] for d in location_data.values()]),
                     'attachments': len(attachments),
                     'templateUsed': owner_template_no,
+                    'timezone': owner_timezone,
                     'emailType': 'multi-location' if is_multi_location else 'single-location'
                 })
                 
@@ -1258,7 +1234,8 @@ Generated on: {datetime.now().strftime("%d/%m/%Y at %H:%M")}"""
                     'email': owner['email'],
                     'status': 'failed',
                     'error': str(e),
-                    'templateUsed': owner_template_no
+                    'templateUsed': owner_template_no,
+                    'timezone': owner_timezone
                 })
         
         # Prepare summary data
@@ -1277,10 +1254,13 @@ Generated on: {datetime.now().strftime("%d/%m/%Y at %H:%M")}"""
             summary_html = generate_summary_report_html(summary_data, today_str)
             summary_text = f"""Daily Reports Summary - {today_str}
 
+Trigger: {trigger_source}
+Scheduled Users: {len(scheduled_users)}
+
 Successful: {emails_sent}
 Failed: {emails_failed}
 Skipped: {emails_skipped}
-Total Owners: {len(owners) if owners else 0}
+Total Users: {len(owners) if owners else 0}
 
 Total Revenue: ₹{total_revenue_summary:,}
 Total Records: {total_records_summary}
@@ -1290,7 +1270,7 @@ Generated on: {datetime.now().strftime("%d/%m/%Y at %H:%M")}"""
             send_email_with_attachments_ses(
                 from_email,
                 from_email,
-                f"Daily Reports Summary - {today_str}",
+                f"Daily Reports Summary - {today_str} ({trigger_source})",
                 summary_html,
                 summary_text,
                 []
@@ -1306,6 +1286,8 @@ Generated on: {datetime.now().strftime("%d/%m/%Y at %H:%M")}"""
         return jsonify({
             'success': True,
             'message': f"Daily reports sent successfully",
+            'trigger': trigger_source,
+            'scheduledUsersCount': len(scheduled_users),
             'emailsSent': emails_sent,
             'emailsFailed': emails_failed,
             'emailsSkipped': emails_skipped,
@@ -1319,6 +1301,7 @@ Generated on: {datetime.now().strftime("%d/%m/%Y at %H:%M")}"""
             'authMethod': 'Bearer token authentication',
             'deliveryMethod': 'AWS SES API',
             'multiLocationSupport': 'Enabled',
+            'schedulingSupport': 'Enabled',
             'results': email_results
         }), 200
         
@@ -1330,7 +1313,8 @@ Generated on: {datetime.now().strftime("%d/%m/%Y at %H:%M")}"""
             'filteringApproach': 'Database-level filtering',
             'authMethod': 'Bearer token authentication',
             'deliveryMethod': 'AWS SES API',
-            'multiLocationSupport': 'Enabled'
+            'multiLocationSupport': 'Enabled',
+            'schedulingSupport': 'Enabled'
         }), 500
 
 
@@ -1341,7 +1325,7 @@ def health():
         'status': 'healthy', 
         'service': 'daily-reports', 
         'delivery': 'AWS SES API',
-        'features': 'Multi-location support enabled'
+        'features': 'Multi-location + User scheduling enabled'
     }), 200
 
 
