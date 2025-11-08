@@ -977,24 +977,24 @@ def send_reports():
             user_ids = [user['user_id'] for user in scheduled_users]
             logger.info(f"Fetching scheduled users: {user_ids}")
             
-            response = supabase.table('users').select('id,email,assigned_location,role,first_name,last_name,templateno').in_('id', user_ids).eq('role', 'owner').execute()
+            response = supabase.table('users').select('id,email,assigned_location,role,first_name,last_name').in_('id', user_ids).eq('role', 'owner').execute()
             owners = response.data
             
             # Merge template info from scheduled_users
             for owner in owners:
-                scheduled_user = next((u for u in scheduled_users if u['user_id'] == owner['id']), None)
-                if scheduled_user:
-                    owner['timezone'] = scheduled_user.get('timezone', 'UTC')
-                    # Prioritize templateno from user_schedules if available
-                    if scheduled_user.get('templateno'):
-                        owner['templateno'] = scheduled_user['templateno']
+              scheduled_user = next((u for u in scheduled_users if u['user_id'] == owner['id']), None)
+              if scheduled_user:
+                owner['timezone'] = scheduled_user.get('timezone', 'UTC')
+                # Get templateno from user_schedules
+                owner['templateno'] = scheduled_user.get('templateno', 1) 
         else:
             # Fallback: fetch all owners (backward compatibility)
-            response = supabase.table('users').select('id,email,assigned_location,role,first_name,last_name,templateno').eq('role', 'owner').execute()
+            response = supabase.table('users').select('id,email,assigned_location,role,first_name,last_name').eq('role', 'owner').execute()
             owners = response.data
             # Set default timezone for all
             for owner in owners:
                 owner['timezone'] = 'UTC'
+                owner['templateno'] = 1 
         
         logger.info(f"Found {len(owners) if owners else 0} owners to process")
         
