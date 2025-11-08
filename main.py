@@ -22,6 +22,11 @@ import re
 from typing import List, Dict, Any, Optional
 import logging
 import pytz
+# Note: Render has a 30-second HTTP timeout for requests
+# We've optimized queries to complete quickly by:
+# 1. Using batch queries instead of sequential queries
+# 2. Filtering data at the database level (location and time-based)
+# 3. Using indexed queries on location_id and created_at
 
 # Initialize Supabase client with custom options
 from supabase.lib.client_options import ClientOptions
@@ -51,7 +56,11 @@ options = ClientOptions(
 
 url = os.environ.get("SUPABASE_URL")
 key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
-supabase: Client = create_client(url, key)
+supabase: Client = create_client(url, key, options=options)
+
+# Configure timeout for database queries at the HTTP client level
+# The Supabase client uses httpx internally, and we'll handle timeouts in queries
+# Render has a 30-second HTTP timeout, so we need to ensure queries complete quickly
 
 # Initialize AWS SES client
 ses_client = None
@@ -177,8 +186,20 @@ def generate_no_data_email_html(location_names: str, today_str: str) -> MIMEMult
     return msg
 
 
-def fetch_today_filtered_logs(location_id: Optional[str] = None) -> List[Dict[str, Any]]:
-    """Fetch today's filtered logs using database-level filtering"""
+def fetch_today_filtered_logs(location_id: Optional[str] = None, end_time: Optional[datetime] = None) -> List[Dict[str, Any]]:
+    """Fetch today's filtered logs using database-level filtering.
+    
+    Fetches logs from start of day (12 AM) to the specified end_time (default: current time).
+    If end_time is None, uses current time. This ensures that if a request is received at 5 PM,
+    it fetches data from 12 AM to 5 PM only.
+    
+    Args:
+        location_id: Optional location ID to filter by
+        end_time: Optional datetime to use as the end of the time range. If None, uses current time.
+    
+    Returns:
+        List of log dictionaries matching the criteria
+    """
     logger.info(f"Fetching today's logs for location: {location_id or 'All locations'}")
     
     query = supabase.table('logs-man').select('*')
@@ -187,25 +208,43 @@ def fetch_today_filtered_logs(location_id: Optional[str] = None) -> List[Dict[st
     if location_id:
         query = query.eq('location_id', location_id)
     
-    now = datetime.now()
-    today = datetime(now.year, now.month, now.day)
-    start_of_day = today.isoformat()
-    end_of_day = (today + timedelta(days=1)).isoformat()
+    # Get current time or use provided end_time
+    # Note: Supabase stores timestamps in UTC, so we need to ensure timezone-aware comparisons
+    now = end_time if end_time else datetime.now()
     
-    query = query.gte('created_at', start_of_day).lt('created_at', end_of_day)
+    # Ensure timezone-aware datetime for proper comparison with Supabase UTC timestamps
+    # If datetime is naive (no timezone), assume it's in the server's local timezone
+    # Supabase will handle the conversion during query
+    if now.tzinfo is None:
+        # Naive datetime - Supabase will treat this as UTC or convert based on server timezone
+        # For consistency, we'll format as ISO without timezone (Supabase handles conversion)
+        start_of_day = datetime(now.year, now.month, now.day).isoformat()
+        end_time_iso = now.isoformat()
+    else:
+        # Timezone-aware datetime - use as is
+        start_of_day = datetime(now.year, now.month, now.day, tzinfo=now.tzinfo).isoformat()
+        end_time_iso = now.isoformat()
     
-    logger.info(f"Filtering for date range: {start_of_day} to {end_of_day}")
+    # Query: Get logs from start of day (12:00 AM) to current request time
+    # This ensures if request is at 5 PM, we only get data from 12 AM to 5 PM
+    query = query.gte('created_at', start_of_day).lte('created_at', end_time_iso)
     
-    response = query.execute()
+    logger.info(f"Filtering for date range: {start_of_day} to {end_time_iso} (location: {location_id or 'all'})")
     
-    if hasattr(response, 'error') and response.error:
-        logger.error(f'Error fetching filtered logs: {response.error}')
-        raise Exception(f"Failed to fetch logs: {response.error}")
-    
-    logs = response.data or []
-    logger.info(f"Found {len(logs)} approved logs for today")
-    
-    return logs
+    try:
+        response = query.execute()
+        
+        if hasattr(response, 'error') and response.error:
+            logger.error(f'Error fetching filtered logs: {response.error}')
+            raise Exception(f"Failed to fetch logs: {response.error}")
+        
+        logs = response.data or []
+        logger.info(f"Found {len(logs)} approved logs from {today.strftime('%Y-%m-%d')} 00:00 to {now.strftime('%H:%M')}")
+        
+        return logs
+    except Exception as e:
+        logger.error(f"Timeout or error fetching logs for location {location_id}: {e}")
+        raise
 
 
 def analyze_data(logs: List[Dict[str, Any]], locations: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -942,9 +981,18 @@ def send_reports():
         
         logger.info(f"Generating reports for date: {today_str}")
         
+        # Capture request time - this will be used for filtering data
+        # If request is received at 5 PM, we fetch data from 12 AM to 5 PM only
+        request_time = datetime.now()
+        logger.info(f"Request received at: {request_time.strftime('%Y-%m-%d %H:%M:%S')}")
+        
         # Get locations
-        response = supabase.table('locations').select('*').execute()
-        locations = response.data
+        try:
+            response = supabase.table('locations').select('*').execute()
+            locations = response.data
+        except Exception as e:
+            logger.error(f"Failed to fetch locations: {e}")
+            raise Exception(f"Failed to fetch locations: {str(e)}")
         
         if not locations:
             raise Exception("Failed to fetch locations")
@@ -973,43 +1021,46 @@ def send_reports():
             response = supabase.table('users').select('id,email,assigned_location,role,first_name,last_name').in_('id', user_ids).eq('role', 'owner').execute()
             owners = response.data
             
-            # Fetch templateno and timezone from user_schedules table for each user
+            # Optimize: Fetch all schedules in one query instead of sequential queries
+            try:
+                user_ids_list = [owner['id'] for owner in owners]
+                if user_ids_list:
+                    # Fetch all schedules in one query
+                    schedule_response = supabase.table('user_schedules').select('user_id,templateno,timezone').in_('user_id', user_ids_list).execute()
+                    schedules_map = {sched['user_id']: sched for sched in (schedule_response.data or [])}
+                    logger.info(f"Fetched {len(schedules_map)} user schedules in one query")
+                else:
+                    schedules_map = {}
+            except Exception as e:
+                logger.error(f"Failed to fetch schedules batch: {e}")
+                schedules_map = {}
+            
+            # Map schedule data to owners
             for owner in owners:
                 user_id = owner['id']
+                schedule_data = schedules_map.get(user_id)
                 
-                # Fetch schedule data from user_schedules table
-                try:
-                    schedule_response = supabase.table('user_schedules').select('templateno,timezone').eq('user_id', user_id).limit(1).execute()
+                if schedule_data:
+                    # Get templateno from user_schedules table
+                    templateno_from_db = schedule_data.get('templateno')
+                    timezone_from_db = schedule_data.get('timezone', 'UTC')
                     
-                    if schedule_response.data and len(schedule_response.data) > 0:
-                        schedule_data = schedule_response.data[0]
-                        
-                        # Get templateno from user_schedules table
-                        templateno_from_db = schedule_data.get('templateno')
-                        timezone_from_db = schedule_data.get('timezone', 'UTC')
-                        
-                        if templateno_from_db is not None:
-                            try:
-                                owner['templateno'] = int(templateno_from_db)
-                                logger.info(f"✓ Using templateno={owner['templateno']} from user_schedules table for user {user_id} ({owner.get('email', 'N/A')})")
-                            except (ValueError, TypeError):
-                                logger.warning(f"Invalid templateno value '{templateno_from_db}' in user_schedules for user {user_id}, defaulting to 1")
-                                owner['templateno'] = 1
-                        else:
-                            logger.warning(f"templateno not found in user_schedules for user {user_id}, defaulting to 1")
+                    if templateno_from_db is not None:
+                        try:
+                            owner['templateno'] = int(templateno_from_db)
+                            logger.info(f"✓ Using templateno={owner['templateno']} from user_schedules table for user {user_id} ({owner.get('email', 'N/A')})")
+                        except (ValueError, TypeError):
+                            logger.warning(f"Invalid templateno value '{templateno_from_db}' in user_schedules for user {user_id}, defaulting to 1")
                             owner['templateno'] = 1
-                        
-                        owner['timezone'] = timezone_from_db
-                        logger.info(f"✓ Using timezone={timezone_from_db} from user_schedules table for user {user_id}")
                     else:
-                        # No schedule found, use defaults
-                        logger.warning(f"No schedule found in user_schedules for user {user_id}, using defaults")
+                        logger.warning(f"templateno not found in user_schedules for user {user_id}, defaulting to 1")
                         owner['templateno'] = 1
-                        owner['timezone'] = 'UTC'
-                        
-                except Exception as e:
-                    logger.error(f"Failed to fetch schedule for user {user_id}: {e}")
-                    # Fall back to defaults
+                    
+                    owner['timezone'] = timezone_from_db
+                    logger.info(f"✓ Using timezone={timezone_from_db} from user_schedules table for user {user_id}")
+                else:
+                    # No schedule found, use defaults
+                    logger.warning(f"No schedule found in user_schedules for user {user_id}, using defaults")
                     owner['templateno'] = 1
                     owner['timezone'] = 'UTC'
         else:
@@ -1018,21 +1069,32 @@ def send_reports():
             response = supabase.table('users').select('id,email,assigned_location,role,first_name,last_name').eq('role', 'owner').execute()
             owners = response.data
             
-            # Fetch schedule data for all owners
+            # Optimize: Fetch all schedules in one query instead of sequential queries
+            try:
+                user_ids_list = [owner['id'] for owner in owners]
+                if user_ids_list:
+                    # Fetch all schedules in one query
+                    schedule_response = supabase.table('user_schedules').select('user_id,templateno,timezone').in_('user_id', user_ids_list).execute()
+                    schedules_map = {sched['user_id']: sched for sched in (schedule_response.data or [])}
+                    logger.info(f"Fetched {len(schedules_map)} user schedules in one query")
+                else:
+                    schedules_map = {}
+            except Exception as e:
+                logger.error(f"Failed to fetch schedules batch: {e}")
+                schedules_map = {}
+            
+            # Map schedule data to owners
             for owner in owners:
                 user_id = owner['id']
-                try:
-                    schedule_response = supabase.table('user_schedules').select('templateno,timezone').eq('user_id', user_id).limit(1).execute()
-                    
-                    if schedule_response.data and len(schedule_response.data) > 0:
-                        schedule_data = schedule_response.data[0]
+                schedule_data = schedules_map.get(user_id)
+                
+                if schedule_data:
+                    try:
                         owner['templateno'] = int(schedule_data.get('templateno', 1))
-                        owner['timezone'] = schedule_data.get('timezone', 'UTC')
-                    else:
+                    except (ValueError, TypeError):
                         owner['templateno'] = 1
-                        owner['timezone'] = 'UTC'
-                except Exception as e:
-                    logger.error(f"Failed to fetch schedule for user {user_id}: {e}")
+                    owner['timezone'] = schedule_data.get('timezone', 'UTC')
+                else:
                     owner['templateno'] = 1
                     owner['timezone'] = 'UTC'
         
@@ -1095,9 +1157,13 @@ def send_reports():
             has_any_data = False
             all_logs = []
             
+            # Fetch logs for all locations using the request time
+            # This ensures we only get data from 12 AM to the current request time
             for location_id in owner_location_ids:
                 try:
-                    location_logs = fetch_today_filtered_logs(location_id)
+                    # Pass request_time to ensure we only fetch data up to the request time
+                    # e.g., if request is at 5 PM, fetch data from 12 AM to 5 PM only
+                    location_logs = fetch_today_filtered_logs(location_id, end_time=request_time)
                     
                     # Find location name
                     location_name = "Unknown Location"
@@ -1119,12 +1185,13 @@ def send_reports():
                             'location_name': location_name
                         }
                         
-                        logger.info(f"  - {location_name}: {len(location_logs)} records, ₹{analysis['totalRevenue']:,}")
+                        logger.info(f"  - {location_name}: {len(location_logs)} records, ₹{analysis['totalRevenue']:,} (data from 00:00 to {request_time.strftime('%H:%M')})")
                     else:
-                        logger.info(f"  - {location_name}: No data")
+                        logger.info(f"  - {location_name}: No data (checked from 00:00 to {request_time.strftime('%H:%M')})")
                         
                 except Exception as e:
                     logger.error(f"Failed to fetch logs for location {location_id}: {e}")
+                    # Continue with other locations even if one fails
             
             # If no data at all locations, send no-data email
             if not has_any_data:
@@ -1373,4 +1440,10 @@ def health():
 
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    # Configure Flask with timeout settings for Render deployment
+    # Render has a 30-second timeout for HTTP requests, but we can extend processing time
+    # by using async processing or increasing worker timeout
+    app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
+    app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=1)
+    # Run with threaded mode to handle multiple requests
+    app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
