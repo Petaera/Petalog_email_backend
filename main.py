@@ -21,12 +21,6 @@ import os
 import re
 from typing import List, Dict, Any, Optional
 import logging
-import pytz
-# Note: Render has a 30-second HTTP timeout for requests
-# We've optimized queries to complete quickly by:
-# 1. Using batch queries instead of sequential queries
-# 2. Filtering data at the database level (location and time-based)
-# 3. Using indexed queries on location_id and created_at
 
 # Initialize Supabase client with custom options
 from supabase.lib.client_options import ClientOptions
@@ -57,10 +51,6 @@ options = ClientOptions(
 url = os.environ.get("SUPABASE_URL")
 key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
 supabase: Client = create_client(url, key, options=options)
-
-# Configure timeout for database queries at the HTTP client level
-# The Supabase client uses httpx internally, and we'll handle timeouts in queries
-# Render has a 30-second HTTP timeout, so we need to ensure queries complete quickly
 
 # Initialize AWS SES client
 ses_client = None
@@ -153,7 +143,7 @@ def generate_no_data_email_html(location_names: str, today_str: str) -> MIMEMult
     <div style="padding: 32px 24px;">
       
       <div style="background: linear-gradient(135deg, #fff3e0 0%, #ffe0b2 100%); padding: 32px 24px; border-radius: 12px; margin-bottom: 24px; border: 2px solid #ff9800; text-align: center;">
-        <div style="font-size: 64px; margin-bottom: 16px;">📭</div>
+        <div style="font-size: 64px; margin-bottom: 16px;">🔭</div>
         <h2 style="margin: 0 0 12px 0; font-size: 24px; color: #e65100;">No Data Available</h2>
         <p style="margin: 0; color: #bf360c; font-size: 16px; line-height: 1.6;">
           No approved transactions were recorded for today across your assigned locations.
@@ -186,16 +176,14 @@ def generate_no_data_email_html(location_names: str, today_str: str) -> MIMEMult
     return msg
 
 
-def fetch_today_filtered_logs(location_id: Optional[str] = None, end_time: Optional[datetime] = None) -> List[Dict[str, Any]]:
+def fetch_today_filtered_logs(location_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """Fetch today's filtered logs using database-level filtering.
     
-    Fetches logs from start of day (12 AM) to the specified end_time (default: current time).
-    If end_time is None, uses current time. This ensures that if a request is received at 5 PM,
-    it fetches data from 12 AM to 5 PM only.
+    Fetches logs from start of day (12 AM) to end of day (11:59 PM).
+    This is the OLD VERSION logic - fetches entire day's data regardless of request time.
     
     Args:
         location_id: Optional location ID to filter by
-        end_time: Optional datetime to use as the end of the time range. If None, uses current time.
     
     Returns:
         List of log dictionaries matching the criteria
@@ -208,28 +196,16 @@ def fetch_today_filtered_logs(location_id: Optional[str] = None, end_time: Optio
     if location_id:
         query = query.eq('location_id', location_id)
     
-    # Get current time or use provided end_time
-    # Note: Supabase stores timestamps in UTC, so we need to ensure timezone-aware comparisons
-    now = end_time if end_time else datetime.now()
+    # Get today's date range (entire day from 12 AM to 11:59 PM)
+    now = datetime.now()
+    today = datetime(now.year, now.month, now.day)
+    start_of_day = today.isoformat()
+    end_of_day = (today + timedelta(days=1)).isoformat()
     
-    # Ensure timezone-aware datetime for proper comparison with Supabase UTC timestamps
-    # If datetime is naive (no timezone), assume it's in the server's local timezone
-    # Supabase will handle the conversion during query
-    if now.tzinfo is None:
-        # Naive datetime - Supabase will treat this as UTC or convert based on server timezone
-        # For consistency, we'll format as ISO without timezone (Supabase handles conversion)
-        start_of_day = datetime(now.year, now.month, now.day).isoformat()
-        end_time_iso = now.isoformat()
-    else:
-        # Timezone-aware datetime - use as is
-        start_of_day = datetime(now.year, now.month, now.day, tzinfo=now.tzinfo).isoformat()
-        end_time_iso = now.isoformat()
+    # Query: Get logs for the entire day
+    query = query.gte('created_at', start_of_day).lt('created_at', end_of_day)
     
-    # Query: Get logs from start of day (12:00 AM) to current request time
-    # This ensures if request is at 5 PM, we only get data from 12 AM to 5 PM
-    query = query.gte('created_at', start_of_day).lte('created_at', end_time_iso)
-    
-    logger.info(f"Filtering for date range: {start_of_day} to {end_time_iso} (location: {location_id or 'all'})")
+    logger.info(f"Filtering for date range: {start_of_day} to {end_of_day} (location: {location_id or 'all'})")
     
     try:
         response = query.execute()
@@ -239,11 +215,11 @@ def fetch_today_filtered_logs(location_id: Optional[str] = None, end_time: Optio
             raise Exception(f"Failed to fetch logs: {response.error}")
         
         logs = response.data or []
-        logger.info(f"Found {len(logs)} approved logs from {today.strftime('%Y-%m-%d')} 00:00 to {now.strftime('%H:%M')}")
+        logger.info(f"Found {len(logs)} approved logs for today")
         
         return logs
     except Exception as e:
-        logger.error(f"Timeout or error fetching logs for location {location_id}: {e}")
+        logger.error(f"Error fetching logs for location {location_id}: {e}")
         raise
 
 
@@ -543,66 +519,13 @@ def generate_multi_location_report_html(location_data: Dict[str, Dict[str, Any]]
               </tr>
               """
     
-    # Generate individual location sections using template functions
+    # Generate individual location sections
     location_sections = []
     for location_id, data in location_data.items():
         analysis = data['analysis']
         location_name = data['location_name']
         
-        # Use the appropriate template for each location
-        if template_no == 3:
-            location_html = generate_template3_html(analysis, location_name, today_str)
-            # Extract HTML from MIMEMultipart if needed
-            if isinstance(location_html, MIMEMultipart):
-                # For multi-location, we'll create a simplified section
-                location_sections.append(f"""
-        <div style="margin-bottom: 32px; padding: 24px; background: #f8f9fa; border-radius: 8px; border-left: 4px solid #667eea;">
-          <h3 style="margin: 0 0 16px 0; font-size: 20px; color: #333;">📍 {location_name}</h3>
-          <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px;">
-            <div style="background: white; padding: 16px; border-radius: 8px; text-align: center;">
-              <p style="margin: 0; font-size: 12px; color: #666;">Total Revenue</p>
-              <h4 style="margin: 8px 0 0 0; font-size: 24px; font-weight: 700; color: #667eea;">₹{analysis['totalRevenue']:,}</h4>
-            </div>
-            <div style="background: white; padding: 16px; border-radius: 8px; text-align: center;">
-              <p style="margin: 0; font-size: 12px; color: #666;">Vehicles</p>
-              <h4 style="margin: 8px 0 0 0; font-size: 24px; font-weight: 700; color: #f093fb;">{analysis['totalVehicles']}</h4>
-            </div>
-            <div style="background: white; padding: 16px; border-radius: 8px; text-align: center;">
-              <p style="margin: 0; font-size: 12px; color: #666;">Avg Service</p>
-              <h4 style="margin: 8px 0 0 0; font-size: 24px; font-weight: 700; color: #4facfe;">₹{round(analysis['avgService'])}</h4>
-            </div>
-          </div>
-        </div>
-                """)
-            else:
-                location_sections.append(location_html)
-        elif template_no == 2:
-            location_html = generate_template2_html(analysis, location_name, today_str)
-            # Simplified section for multi-location
-            location_sections.append(f"""
-        <div style="margin-bottom: 32px; padding: 24px; background: #f8f9fa; border-radius: 8px; border-left: 4px solid #667eea;">
-          <h3 style="margin: 0 0 16px 0; font-size: 20px; color: #333;">📍 {location_name}</h3>
-          <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px;">
-            <div style="background: white; padding: 16px; border-radius: 8px; text-align: center;">
-              <p style="margin: 0; font-size: 12px; color: #666;">Total Revenue</p>
-              <h4 style="margin: 8px 0 0 0; font-size: 24px; font-weight: 700; color: #667eea;">₹{analysis['totalRevenue']:,}</h4>
-            </div>
-            <div style="background: white; padding: 16px; border-radius: 8px; text-align: center;">
-              <p style="margin: 0; font-size: 12px; color: #666;">Vehicles</p>
-              <h4 style="margin: 8px 0 0 0; font-size: 24px; font-weight: 700; color: #f093fb;">{analysis['totalVehicles']}</h4>
-            </div>
-            <div style="background: white; padding: 16px; border-radius: 8px; text-align: center;">
-              <p style="margin: 0; font-size: 12px; color: #666;">Avg Service</p>
-              <h4 style="margin: 8px 0 0 0; font-size: 24px; font-weight: 700; color: #4facfe;">₹{round(analysis['avgService'])}</h4>
-            </div>
-          </div>
-        </div>
-                """)
-        else:
-            # Template 1 - use the HTML string directly
-            location_html_str = generate_template1_html(analysis, location_name, today_str)
-            # Extract just the content section from template1
-            location_sections.append(f"""
+        location_sections.append(f"""
         <div style="margin-bottom: 32px; padding: 24px; background: #f8f9fa; border-radius: 8px; border-left: 4px solid #667eea;">
           <h3 style="margin: 0 0 16px 0; font-size: 20px; color: #333;">📍 {location_name}</h3>
           <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px;">
@@ -732,7 +655,7 @@ def generate_summary_report_html(summary_data: Dict[str, Any], today_str: str) -
     results_rows = ""
     for result in results:
         status_color = '#28a745' if result.get('status') == 'success' else '#dc3545' if result.get('status') == 'failed' else '#ffc107'
-        status_icon = '✅' if result.get('status') == 'success' else '❌' if result.get('status') == 'failed' else '⏭️'
+        status_icon = '✅' if result.get('status') == 'success' else '❌' if result.get('status') == 'failed' else '⭐️'
         
         revenue = result.get('revenue', 0)
         record_count = result.get('recordCount', 0)
@@ -981,11 +904,6 @@ def send_reports():
         
         logger.info(f"Generating reports for date: {today_str}")
         
-        # Capture request time - this will be used for filtering data
-        # If request is received at 5 PM, we fetch data from 12 AM to 5 PM only
-        request_time = datetime.now()
-        logger.info(f"Request received at: {request_time.strftime('%Y-%m-%d %H:%M:%S')}")
-        
         # Get locations
         try:
             response = supabase.table('locations').select('*').execute()
@@ -998,15 +916,6 @@ def send_reports():
             raise Exception("Failed to fetch locations")
         
         logger.info(f"Found {len(locations)} locations")
-        
-        # Create a mapping of scheduled user data for quick lookup
-        scheduled_user_map = {}
-        for user in scheduled_users:
-            user_id = user.get('user_id')
-            if not user_id:
-                logger.warning(f"Skipping user entry without user_id: {user}")
-                continue
-            scheduled_user_map[user_id] = user
         
         # Fetch owners based on scheduled users
         if scheduled_users:
@@ -1021,14 +930,13 @@ def send_reports():
             response = supabase.table('users').select('id,email,assigned_location,role,first_name,last_name').in_('id', user_ids).eq('role', 'owner').execute()
             owners = response.data
             
-            # Optimize: Fetch all schedules in one query instead of sequential queries
+            # Fetch schedules for these users
             try:
                 user_ids_list = [owner['id'] for owner in owners]
                 if user_ids_list:
-                    # Fetch all schedules in one query
                     schedule_response = supabase.table('user_schedules').select('user_id,templateno,timezone').in_('user_id', user_ids_list).execute()
                     schedules_map = {sched['user_id']: sched for sched in (schedule_response.data or [])}
-                    logger.info(f"Fetched {len(schedules_map)} user schedules in one query")
+                    logger.info(f"Fetched {len(schedules_map)} user schedules")
                 else:
                     schedules_map = {}
             except Exception as e:
@@ -1041,42 +949,39 @@ def send_reports():
                 schedule_data = schedules_map.get(user_id)
                 
                 if schedule_data:
-                    # Get templateno from user_schedules table
                     templateno_from_db = schedule_data.get('templateno')
                     timezone_from_db = schedule_data.get('timezone', 'UTC')
                     
                     if templateno_from_db is not None:
                         try:
                             owner['templateno'] = int(templateno_from_db)
-                            logger.info(f"✓ Using templateno={owner['templateno']} from user_schedules table for user {user_id} ({owner.get('email', 'N/A')})")
+                            logger.info(f"✓ Using templateno={owner['templateno']} from user_schedules for user {user_id}")
                         except (ValueError, TypeError):
-                            logger.warning(f"Invalid templateno value '{templateno_from_db}' in user_schedules for user {user_id}, defaulting to 1")
+                            logger.warning(f"Invalid templateno value '{templateno_from_db}' for user {user_id}, defaulting to 1")
                             owner['templateno'] = 1
                     else:
-                        logger.warning(f"templateno not found in user_schedules for user {user_id}, defaulting to 1")
+                        logger.warning(f"templateno not found for user {user_id}, defaulting to 1")
                         owner['templateno'] = 1
                     
                     owner['timezone'] = timezone_from_db
-                    logger.info(f"✓ Using timezone={timezone_from_db} from user_schedules table for user {user_id}")
+                    logger.info(f"✓ Using timezone={timezone_from_db} for user {user_id}")
                 else:
-                    # No schedule found, use defaults
-                    logger.warning(f"No schedule found in user_schedules for user {user_id}, using defaults")
+                    logger.warning(f"No schedule found for user {user_id}, using defaults")
                     owner['templateno'] = 1
                     owner['timezone'] = 'UTC'
         else:
             # Fallback: fetch all owners (backward compatibility)
-            logger.warning("No scheduled users provided in request - using backward compatibility mode")
+            logger.warning("No scheduled users provided - using backward compatibility mode")
             response = supabase.table('users').select('id,email,assigned_location,role,first_name,last_name').eq('role', 'owner').execute()
             owners = response.data
             
-            # Optimize: Fetch all schedules in one query instead of sequential queries
+            # Fetch schedules for all owners
             try:
                 user_ids_list = [owner['id'] for owner in owners]
                 if user_ids_list:
-                    # Fetch all schedules in one query
                     schedule_response = supabase.table('user_schedules').select('user_id,templateno,timezone').in_('user_id', user_ids_list).execute()
                     schedules_map = {sched['user_id']: sched for sched in (schedule_response.data or [])}
-                    logger.info(f"Fetched {len(schedules_map)} user schedules in one query")
+                    logger.info(f"Fetched {len(schedules_map)} user schedules")
                 else:
                     schedules_map = {}
             except Exception as e:
@@ -1157,13 +1062,11 @@ def send_reports():
             has_any_data = False
             all_logs = []
             
-            # Fetch logs for all locations using the request time
-            # This ensures we only get data from 12 AM to the current request time
+            # Fetch logs for all locations (ENTIRE DAY - old version logic)
             for location_id in owner_location_ids:
                 try:
-                    # Pass request_time to ensure we only fetch data up to the request time
-                    # e.g., if request is at 5 PM, fetch data from 12 AM to 5 PM only
-                    location_logs = fetch_today_filtered_logs(location_id, end_time=request_time)
+                    # OLD VERSION: Fetch entire day's data
+                    location_logs = fetch_today_filtered_logs(location_id)
                     
                     # Find location name
                     location_name = "Unknown Location"
@@ -1185,9 +1088,9 @@ def send_reports():
                             'location_name': location_name
                         }
                         
-                        logger.info(f"  - {location_name}: {len(location_logs)} records, ₹{analysis['totalRevenue']:,} (data from 00:00 to {request_time.strftime('%H:%M')})")
+                        logger.info(f"  - {location_name}: {len(location_logs)} records, ₹{analysis['totalRevenue']:,}")
                     else:
-                        logger.info(f"  - {location_name}: No data (checked from 00:00 to {request_time.strftime('%H:%M')})")
+                        logger.info(f"  - {location_name}: No data")
                         
                 except Exception as e:
                     logger.error(f"Failed to fetch logs for location {location_id}: {e}")
@@ -1405,7 +1308,7 @@ Generated on: {datetime.now().strftime("%d/%m/%Y at %H:%M")}"""
             'reportDate': today_str,
             'summaryEmailSent': True,
             'summaryEmailTo': from_email,
-            'filteringApproach': 'Database-level filtering',
+            'filteringApproach': 'Database-level filtering (entire day)',
             'authMethod': 'Bearer token authentication',
             'deliveryMethod': 'AWS SES API',
             'multiLocationSupport': 'Enabled',
@@ -1419,7 +1322,7 @@ Generated on: {datetime.now().strftime("%d/%m/%Y at %H:%M")}"""
         return jsonify({
             'success': False,
             'error': str(err),
-            'filteringApproach': 'Database-level filtering',
+            'filteringApproach': 'Database-level filtering (entire day)',
             'authMethod': 'Bearer token authentication',
             'deliveryMethod': 'AWS SES API',
             'multiLocationSupport': 'Enabled',
@@ -1441,8 +1344,6 @@ def health():
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))
     # Configure Flask with timeout settings for Render deployment
-    # Render has a 30-second timeout for HTTP requests, but we can extend processing time
-    # by using async processing or increasing worker timeout
     app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
     app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=1)
     # Run with threaded mode to handle multiple requests
