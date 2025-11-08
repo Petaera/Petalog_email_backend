@@ -40,8 +40,6 @@ app = Flask(__name__)
 
 # CONFIGURATION VARIABLES
 load_dotenv()
-TEST_EMAIL = os.getenv("TEST_EMAIL")
-TEMPLATE_NO = int(os.getenv("TEMPLATE_NO", "1"))
 
 # Create client options
 options = ClientOptions(
@@ -124,16 +122,8 @@ def escape_csv(value: Any) -> str:
     return str_value
 
 
-def generate_no_data_email_html(location_names: str, today_str: str, test_email: Optional[str]) -> MIMEMultipart:
+def generate_no_data_email_html(location_names: str, today_str: str) -> MIMEMultipart:
     """Generate HTML for no-data notification email"""
-    test_banner = f"""
-    <div style="background-color: #ff9800; color: white; padding: 12px 24px; text-align: center; font-weight: bold;">
-      TEST MODE - This is a test email
-    </div>
-    """ if test_email else ""
-    
-    test_footer = f'<p style="margin: 8px 0 0 0; color: #ff9800; font-size: 12px; font-weight: bold;">Test email sent to: {test_email}</p>' if test_email else ""
-    
     html = f"""
 <!DOCTYPE html>
 <html>
@@ -144,8 +134,6 @@ def generate_no_data_email_html(location_names: str, today_str: str, test_email:
 </head>
 <body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f5f5f5;">
   <div style="max-width: 600px; margin: 40px auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
-    
-    {test_banner}
     
     <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 32px 24px; text-align: center;">
       <h1 style="margin: 0; font-size: 32px; font-weight: 600;">📊 Daily Business Report</h1>
@@ -176,7 +164,6 @@ def generate_no_data_email_html(location_names: str, today_str: str, test_email:
       <p style="margin: 0; color: #6c757d; font-size: 12px;">
         Report generated on {datetime.now().strftime("%d/%m/%Y at %H:%M")}
       </p>
-      {test_footer}
     </div>
     
   </div>
@@ -931,22 +918,6 @@ def send_reports():
         logger.info(f"Trigger source: {trigger_source}")
         logger.info(f"Scheduled users count: {len(scheduled_users)}")
         
-        # Log the request format to verify templateno is in the request
-        if scheduled_users:
-            logger.info("Request payload structure:")
-            for user in scheduled_users:
-                user_id = user.get('user_id', 'N/A')
-                templateno = user.get('templateno', 'NOT PROVIDED')
-                timezone = user.get('timezone', 'NOT PROVIDED')
-                logger.info(f"  - user_id: {user_id}, templateno: {templateno} (from request), timezone: {timezone} (from request)")
-        
-        test_email = TEST_EMAIL
-        
-        if test_email:
-            logger.info(f"TEST MODE ENABLED: Will send to {test_email} only")
-        else:
-            logger.info("PRODUCTION MODE: Will send to scheduled users")
-        
         # Validate environment variables
         required_vars = ['AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'SES_VERIFIED_FROM']
         for var in required_vars:
@@ -981,7 +952,6 @@ def send_reports():
         logger.info(f"Found {len(locations)} locations")
         
         # Create a mapping of scheduled user data for quick lookup
-        # Format: { "users": [ { "user_id": "123", "templateno": 2, "timezone": "UTC" } ] }
         scheduled_user_map = {}
         for user in scheduled_users:
             user_id = user.get('user_id')
@@ -991,7 +961,6 @@ def send_reports():
             scheduled_user_map[user_id] = user
         
         # Fetch owners based on scheduled users
-        # NOTE: templateno is ALWAYS fetched from the request payload, NEVER from the users table
         if scheduled_users:
             # Get only the scheduled users
             user_ids = [user.get('user_id') for user in scheduled_users if user.get('user_id')]
@@ -1000,49 +969,72 @@ def send_reports():
             
             logger.info(f"Fetching scheduled users from database: {user_ids}")
             
-            # Fetch users from database - explicitly NOT selecting templateno from users table
-            # templateno must come from the request payload (format: { "user_id": "123", "templateno": 2, "timezone": "UTC" })
+            # Fetch users from database
             response = supabase.table('users').select('id,email,assigned_location,role,first_name,last_name').in_('id', user_ids).eq('role', 'owner').execute()
             owners = response.data
             
-            # Merge template and timezone info from the request payload ONLY
+            # Fetch templateno and timezone from user_schedules table for each user
             for owner in owners:
-                scheduled_data = scheduled_user_map.get(owner['id'])
-                if scheduled_data:
-                    # Get templateno and timezone directly from the request payload
-                    # This is the ONLY source for templateno - NOT from users table
-                    templateno_from_request = scheduled_data.get('templateno')
-                    timezone_from_request = scheduled_data.get('timezone', 'UTC')
+                user_id = owner['id']
+                
+                # Fetch schedule data from user_schedules table
+                try:
+                    schedule_response = supabase.table('user_schedules').select('templateno,timezone').eq('user_id', user_id).limit(1).execute()
                     
-                    # Validate and assign templateno from request
-                    if templateno_from_request is None:
-                        logger.warning(f"templateno not provided in request for user {owner['id']} ({owner.get('email', 'N/A')}), defaulting to 1")
-                        owner['templateno'] = 1
-                    else:
-                        # Ensure templateno is an integer
-                        try:
-                            owner['templateno'] = int(templateno_from_request)
-                            logger.info(f"✓ Using templateno={owner['templateno']} from REQUEST (not from users table) for user {owner['id']} ({owner.get('email', 'N/A')})")
-                        except (ValueError, TypeError):
-                            logger.warning(f"Invalid templateno value '{templateno_from_request}' in request for user {owner['id']}, defaulting to 1")
+                    if schedule_response.data and len(schedule_response.data) > 0:
+                        schedule_data = schedule_response.data[0]
+                        
+                        # Get templateno from user_schedules table
+                        templateno_from_db = schedule_data.get('templateno')
+                        timezone_from_db = schedule_data.get('timezone', 'UTC')
+                        
+                        if templateno_from_db is not None:
+                            try:
+                                owner['templateno'] = int(templateno_from_db)
+                                logger.info(f"✓ Using templateno={owner['templateno']} from user_schedules table for user {user_id} ({owner.get('email', 'N/A')})")
+                            except (ValueError, TypeError):
+                                logger.warning(f"Invalid templateno value '{templateno_from_db}' in user_schedules for user {user_id}, defaulting to 1")
+                                owner['templateno'] = 1
+                        else:
+                            logger.warning(f"templateno not found in user_schedules for user {user_id}, defaulting to 1")
                             owner['templateno'] = 1
-                    
-                    owner['timezone'] = timezone_from_request
-                else:
-                    # This should not happen if request data is correct
-                    logger.warning(f"User {owner['id']} ({owner.get('email', 'N/A')}) not found in scheduled_user_map, using defaults")
+                        
+                        owner['timezone'] = timezone_from_db
+                        logger.info(f"✓ Using timezone={timezone_from_db} from user_schedules table for user {user_id}")
+                    else:
+                        # No schedule found, use defaults
+                        logger.warning(f"No schedule found in user_schedules for user {user_id}, using defaults")
+                        owner['templateno'] = 1
+                        owner['timezone'] = 'UTC'
+                        
+                except Exception as e:
+                    logger.error(f"Failed to fetch schedule for user {user_id}: {e}")
+                    # Fall back to defaults
                     owner['templateno'] = 1
                     owner['timezone'] = 'UTC'
         else:
             # Fallback: fetch all owners (backward compatibility)
-            # For backward compatibility, we still don't fetch templateno from users table
             logger.warning("No scheduled users provided in request - using backward compatibility mode")
             response = supabase.table('users').select('id,email,assigned_location,role,first_name,last_name').eq('role', 'owner').execute()
             owners = response.data
-            # Set default timezone and template for all (NOT from users table)
+            
+            # Fetch schedule data for all owners
             for owner in owners:
-                owner['timezone'] = 'UTC'
-                owner['templateno'] = 1
+                user_id = owner['id']
+                try:
+                    schedule_response = supabase.table('user_schedules').select('templateno,timezone').eq('user_id', user_id).limit(1).execute()
+                    
+                    if schedule_response.data and len(schedule_response.data) > 0:
+                        schedule_data = schedule_response.data[0]
+                        owner['templateno'] = int(schedule_data.get('templateno', 1))
+                        owner['timezone'] = schedule_data.get('timezone', 'UTC')
+                    else:
+                        owner['templateno'] = 1
+                        owner['timezone'] = 'UTC'
+                except Exception as e:
+                    logger.error(f"Failed to fetch schedule for user {user_id}: {e}")
+                    owner['templateno'] = 1
+                    owner['timezone'] = 'UTC'
         
         logger.info(f"Found {len(owners) if owners else 0} owners to process")
         
@@ -1091,7 +1083,7 @@ def send_reports():
                 })
                 continue
             
-            # Get template and timezone from the merged owner data (from request payload)
+            # Get template and timezone from user_schedules (now stored in owner dict)
             owner_template_no = owner.get('templateno', 1) or 1
             owner_timezone = owner.get('timezone', 'UTC')
             is_multi_location = len(owner_location_ids) > 1
@@ -1139,7 +1131,7 @@ def send_reports():
                 logger.info(f"No data across all locations for {owner['email']}")
                 try:
                     location_names = ", ".join([loc['name'] for loc in locations if loc['id'] in owner_location_ids])
-                    no_data_html = generate_no_data_email_html(location_names, today_str, None)
+                    no_data_html = generate_no_data_email_html(location_names, today_str)
                     no_data_text = f"""No Data Report - {today_str}
 
 Locations: {location_names}
@@ -1351,6 +1343,7 @@ Generated on: {datetime.now().strftime("%d/%m/%Y at %H:%M")}"""
             'deliveryMethod': 'AWS SES API',
             'multiLocationSupport': 'Enabled',
             'schedulingSupport': 'Enabled',
+            'templateSource': 'user_schedules table',
             'results': email_results
         }), 200
         
@@ -1363,7 +1356,8 @@ Generated on: {datetime.now().strftime("%d/%m/%Y at %H:%M")}"""
             'authMethod': 'Bearer token authentication',
             'deliveryMethod': 'AWS SES API',
             'multiLocationSupport': 'Enabled',
-            'schedulingSupport': 'Enabled'
+            'schedulingSupport': 'Enabled',
+            'templateSource': 'user_schedules table'
         }), 500
 
 @app.route('/health', methods=['GET'])

@@ -3,15 +3,12 @@ Template 1: Classic Daily Report Email Template
 """
 
 from datetime import datetime
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 
 def generate_template1_html(analysis: Dict[str, Any], location_name: str, 
                             today_str: str) -> str:
     """Generate HTML for Template 1 (Classic)"""
-    
-    test_banner = ""
-    test_footer = ""
     
     # Payment breakdown rows
     payment_rows = ""
@@ -85,8 +82,6 @@ def generate_template1_html(analysis: Dict[str, Any], location_name: str,
 </head>
 <body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f5f5f5;">
   <div style="max-width: 700px; margin: 40px auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
-    
-    {test_banner}
     
     <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 32px 24px; text-align: center;">
       <h1 style="margin: 0; font-size: 32px; font-weight: 600;">📊 Daily Business Report</h1>
@@ -191,7 +186,6 @@ def generate_template1_html(analysis: Dict[str, Any], location_name: str,
       <p style="margin: 0; color: #6c757d; font-size: 12px;">
         Report generated on {datetime.now().strftime("%d/%m/%Y at %H:%M")}
       </p>
-      {test_footer}
     </div>
     
   </div>
