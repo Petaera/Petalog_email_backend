@@ -32,3 +32,5 @@ numpy==2.2.3
 
 # Image Processing (implicit matplotlib dependency)
 Pillow>=10.0.0
+
+pytz==2024.1
