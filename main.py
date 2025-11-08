@@ -4,6 +4,7 @@ Converts Supabase Edge Function to Python Flask server
 Works locally and on Render
 Uses AWS SES API instead of SMTP
 Sends reports to all owners with their specific templates
+ENHANCED: Multi-location support for owners with multiple branches
 """
 
 from flask import Flask, request, jsonify
@@ -81,6 +82,31 @@ def get_owner_display_name(owner: Dict[str, Any]) -> str:
     if owner.get('name'):
         return owner.get('name')
     return owner.get('email') or owner.get('id') or 'Unknown'
+
+
+def get_owner_locations(owner: Dict[str, Any], locations: List[Dict[str, Any]]) -> List[str]:
+    """
+    Get all location IDs assigned to an owner.
+    Handles both single location (string) and multiple locations (comma-separated or array).
+    """
+    assigned = owner.get('assigned_location')
+    
+    if not assigned:
+        # If no assignment, owner sees all locations
+        return [loc['id'] for loc in locations]
+    
+    # Handle array format
+    if isinstance(assigned, list):
+        return assigned
+    
+    # Handle comma-separated string format
+    if isinstance(assigned, str):
+        if ',' in assigned:
+            return [loc.strip() for loc in assigned.split(',')]
+        else:
+            return [assigned]
+    
+    return []
 
 
 def escape_csv(value: Any) -> str:
@@ -174,6 +200,7 @@ def generate_summary_report_html(summary_data: Dict[str, Any], today_str: str) -
             <td style="padding: 10px; border-bottom: 1px solid #ddd;">{result['email']}</td>
             <td style="padding: 10px; border-bottom: 1px solid #ddd; text-align: center;">{result.get('recordCount', 'N/A')}</td>
             <td style="padding: 10px; border-bottom: 1px solid #ddd; text-align: right;">₹{result.get('revenue', 0):,}</td>
+            <td style="padding: 10px; border-bottom: 1px solid #ddd;">{result.get('locations', 'N/A')}</td>
             <td style="padding: 10px; border-bottom: 1px solid #ddd;">{result.get('templateUsed', 'N/A')}</td>
             <td style="padding: 10px; border-bottom: 1px solid #ddd;">{result.get('error', 'N/A')}</td>
         </tr>
@@ -234,6 +261,7 @@ def generate_summary_report_html(summary_data: Dict[str, Any], today_str: str) -
             <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd; font-weight: 600;">Email</th>
             <th style="padding: 12px; text-align: center; border-bottom: 2px solid #ddd; font-weight: 600;">Records</th>
             <th style="padding: 12px; text-align: right; border-bottom: 2px solid #ddd; font-weight: 600;">Revenue</th>
+            <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd; font-weight: 600;">Locations</th>
             <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd; font-weight: 600;">Template</th>
             <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd; font-weight: 600;">Error</th>
           </tr>
@@ -255,6 +283,306 @@ def generate_summary_report_html(summary_data: Dict[str, Any], today_str: str) -
 </body>
 </html>
     """.strip()
+
+
+def generate_multi_location_report_html(
+    location_data: Dict[str, Dict[str, Any]], 
+    locations: List[Dict[str, Any]],
+    today_str: str,
+    template_no: int
+) -> MIMEMultipart:
+    """
+    Generate comprehensive multi-location report with consolidated summary.
+    
+    Args:
+        location_data: Dict mapping location_id to {analysis, logs, location_name}
+        locations: All locations data
+        today_str: Date string
+        template_no: Template number to use
+    """
+    # Calculate consolidated totals
+    total_revenue = sum(data['analysis']['totalRevenue'] for data in location_data.values())
+    total_vehicles = sum(data['analysis']['totalVehicles'] for data in location_data.values())
+    total_locations = len(location_data)
+    avg_per_location = total_revenue / total_locations if total_locations > 0 else 0
+    
+    # Build location sections HTML
+    location_sections = []
+    
+    for location_id, data in location_data.items():
+        analysis = data['analysis']
+        location_name = data['location_name']
+        
+        # Payment breakdown for this location
+        payment_rows = ""
+        for item in analysis['paymentModeBreakdown']:
+            upi_details = ""
+            if item['mode'].lower() == 'upi' and item.get('upiAccounts'):
+                upi_list = "<ul style='margin: 4px 0; padding-left: 20px;'>"
+                for account_name, account_data in item['upiAccounts'].items():
+                    upi_list += f"<li style='font-size: 13px;'>{account_name}: ₹{account_data['amount']:,} ({account_data['count']} vehicles)</li>"
+                upi_list += "</ul>"
+                upi_details = f"""
+                <tr>
+                  <td colspan="4" style="padding: 8px 12px; background-color: #f8f9fa; border-bottom: 1px solid #e9ecef;">
+                    <strong style="color: #495057;">UPI Accounts:</strong>
+                    {upi_list}
+                  </td>
+                </tr>
+                """
+            
+            payment_rows += f"""
+            <tr>
+              <td style="padding: 10px; border-bottom: 1px solid #e9ecef;">{item['mode']}</td>
+              <td style="padding: 10px; border-bottom: 1px solid #e9ecef; text-align: right; font-weight: 600;">₹{item['revenue']:,}</td>
+              <td style="padding: 10px; border-bottom: 1px solid #e9ecef; text-align: center;">{item['count']}</td>
+              <td style="padding: 10px; border-bottom: 1px solid #e9ecef; text-align: right;">{item['percentage']:.1f}%</td>
+            </tr>
+            {upi_details}
+            """
+        
+        # Service breakdown
+        service_rows = ""
+        for item in analysis['serviceBreakdown']:
+            service_rows += f"""
+            <tr>
+              <td style="padding: 10px; border-bottom: 1px solid #e9ecef;">{item['service']}</td>
+              <td style="padding: 10px; border-bottom: 1px solid #e9ecef; text-align: center;">{item['count']}</td>
+              <td style="padding: 10px; border-bottom: 1px solid #e9ecef; text-align: right; font-weight: 600;">₹{item['revenue']:,}</td>
+              <td style="padding: 10px; border-bottom: 1px solid #e9ecef; text-align: right;">₹{round(item['price'])}</td>
+            </tr>
+            """
+        
+        # Vehicle distribution
+        vehicle_rows = ""
+        for item in analysis['vehicleDistribution']:
+            vehicle_rows += f"""
+            <tr>
+              <td style="padding: 10px; border-bottom: 1px solid #e9ecef;">{item['type']}</td>
+              <td style="padding: 10px; border-bottom: 1px solid #e9ecef; text-align: center;">{item['count']}</td>
+              <td style="padding: 10px; border-bottom: 1px solid #e9ecef; text-align: right;">{item['percentage']:.1f}%</td>
+            </tr>
+            """
+        
+        # Hourly breakdown
+        hourly_rows = ""
+        for item in analysis['hourlyBreakdown']:
+            hourly_rows += f"""
+            <tr>
+              <td style="padding: 10px; border-bottom: 1px solid #e9ecef;">{item['display']}</td>
+              <td style="padding: 10px; border-bottom: 1px solid #e9ecef; text-align: center;">{item['count']}</td>
+              <td style="padding: 10px; border-bottom: 1px solid #e9ecef; text-align: right; font-weight: 600;">₹{item['amount']:,}</td>
+            </tr>
+            """
+        
+        # Build this location's section
+        location_section = f"""
+        <!-- Location: {location_name} -->
+        <div style="margin-bottom: 40px; border: 2px solid #667eea; border-radius: 12px; overflow: hidden; background: white;">
+            
+            <!-- Location Header -->
+            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 24px; text-align: center;">
+                <h2 style="margin: 0; font-size: 26px; font-weight: 600;">📍 {location_name}</h2>
+                <p style="margin: 8px 0 0 0; font-size: 14px; opacity: 0.9;">Location Performance Report</p>
+            </div>
+            
+            <div style="padding: 24px;">
+                
+                <!-- Location Summary Cards -->
+                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 24px;">
+                    <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 16px; border-radius: 8px; text-align: center;">
+                        <p style="margin: 0; font-size: 12px; opacity: 0.9; text-transform: uppercase;">Revenue</p>
+                        <h3 style="margin: 6px 0 0 0; font-size: 24px; font-weight: 700;">₹{analysis['totalRevenue']:,}</h3>
+                    </div>
+                    <div style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; padding: 16px; border-radius: 8px; text-align: center;">
+                        <p style="margin: 0; font-size: 12px; opacity: 0.9; text-transform: uppercase;">Vehicles</p>
+                        <h3 style="margin: 6px 0 0 0; font-size: 24px; font-weight: 700;">{analysis['totalVehicles']}</h3>
+                    </div>
+                    <div style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); color: white; padding: 16px; border-radius: 8px; text-align: center;">
+                        <p style="margin: 0; font-size: 12px; opacity: 0.9; text-transform: uppercase;">Avg Service</p>
+                        <h3 style="margin: 6px 0 0 0; font-size: 24px; font-weight: 700;">₹{round(analysis['avgService'])}</h3>
+                    </div>
+                </div>
+                
+                <!-- Payment Breakdown -->
+                <div style="margin-bottom: 24px;">
+                    <h3 style="color: #333; font-size: 18px; margin: 0 0 12px 0; border-bottom: 2px solid #667eea; padding-bottom: 6px;">💳 Payment Breakdown</h3>
+                    <table style="width: 100%; border-collapse: collapse; background-color: #fff; border-radius: 8px; overflow: hidden;">
+                        <thead>
+                            <tr style="background-color: #667eea; color: white;">
+                                <th style="padding: 10px; text-align: left; font-weight: 600; font-size: 13px;">Mode</th>
+                                <th style="padding: 10px; text-align: right; font-weight: 600; font-size: 13px;">Revenue</th>
+                                <th style="padding: 10px; text-align: center; font-weight: 600; font-size: 13px;">Count</th>
+                                <th style="padding: 10px; text-align: right; font-weight: 600; font-size: 13px;">%</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {payment_rows}
+                        </tbody>
+                    </table>
+                </div>
+                
+                <!-- Service Breakdown -->
+                <div style="margin-bottom: 24px;">
+                    <h3 style="color: #333; font-size: 18px; margin: 0 0 12px 0; border-bottom: 2px solid #f093fb; padding-bottom: 6px;">🛠️ Service Breakdown</h3>
+                    <table style="width: 100%; border-collapse: collapse; background-color: #fff; border-radius: 8px; overflow: hidden;">
+                        <thead>
+                            <tr style="background-color: #f093fb; color: white;">
+                                <th style="padding: 10px; text-align: left; font-weight: 600; font-size: 13px;">Service</th>
+                                <th style="padding: 10px; text-align: center; font-weight: 600; font-size: 13px;">Count</th>
+                                <th style="padding: 10px; text-align: right; font-weight: 600; font-size: 13px;">Revenue</th>
+                                <th style="padding: 10px; text-align: right; font-weight: 600; font-size: 13px;">Avg Price</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {service_rows}
+                        </tbody>
+                    </table>
+                </div>
+                
+                <!-- Two Column Layout -->
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                    
+                    <!-- Vehicle Distribution -->
+                    <div>
+                        <h3 style="color: #333; font-size: 18px; margin: 0 0 12px 0; border-bottom: 2px solid #4facfe; padding-bottom: 6px;">🚗 Vehicles</h3>
+                        <table style="width: 100%; border-collapse: collapse; background-color: #fff; border-radius: 8px; overflow: hidden;">
+                            <thead>
+                                <tr style="background-color: #4facfe; color: white;">
+                                    <th style="padding: 10px; text-align: left; font-weight: 600; font-size: 13px;">Type</th>
+                                    <th style="padding: 10px; text-align: center; font-weight: 600; font-size: 13px;">Count</th>
+                                    <th style="padding: 10px; text-align: right; font-weight: 600; font-size: 13px;">%</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {vehicle_rows}
+                            </tbody>
+                        </table>
+                    </div>
+                    
+                    <!-- Hourly Performance -->
+                    <div>
+                        <h3 style="color: #333; font-size: 18px; margin: 0 0 12px 0; border-bottom: 2px solid #43e97b; padding-bottom: 6px;">⏰ Hourly</h3>
+                        <table style="width: 100%; border-collapse: collapse; background-color: #fff; border-radius: 8px; overflow: hidden;">
+                            <thead>
+                                <tr style="background-color: #43e97b; color: white;">
+                                    <th style="padding: 10px; text-align: left; font-weight: 600; font-size: 13px;">Time</th>
+                                    <th style="padding: 10px; text-align: center; font-weight: 600; font-size: 13px;">Count</th>
+                                    <th style="padding: 10px; text-align: right; font-weight: 600; font-size: 13px;">Revenue</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {hourly_rows}
+                            </tbody>
+                        </table>
+                    </div>
+                    
+                </div>
+                
+            </div>
+        </div>
+        """
+        
+        location_sections.append(location_section)
+    
+    # Build complete HTML
+    html = f"""
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Multi-Location Business Report</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f5f5f5;">
+  <div style="max-width: 900px; margin: 40px auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+    
+    <!-- Main Header -->
+    <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 32px 24px; text-align: center;">
+      <h1 style="margin: 0; font-size: 32px; font-weight: 600;">📊 Multi-Location Business Report</h1>
+      <p style="margin: 8px 0 0 0; font-size: 16px; opacity: 0.9;">{today_str}</p>
+      <p style="margin: 4px 0 0 0; font-size: 14px; opacity: 0.8;">🏢 {total_locations} Locations</p>
+    </div>
+    
+    <div style="padding: 32px 24px;">
+      
+      <!-- Consolidated Summary -->
+      <div style="background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%); padding: 24px; border-radius: 12px; margin-bottom: 32px; border: 2px solid #4caf50;">
+        <h2 style="margin: 0 0 16px 0; font-size: 22px; color: #2e7d32; text-align: center;">📈 Consolidated Summary</h2>
+        
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px;">
+          <div style="background: white; padding: 16px; border-radius: 8px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+            <p style="margin: 0; font-size: 12px; color: #666; text-transform: uppercase;">Total Revenue</p>
+            <h3 style="margin: 6px 0 0 0; font-size: 26px; font-weight: 700; color: #2e7d32;">₹{total_revenue:,}</h3>
+          </div>
+          <div style="background: white; padding: 16px; border-radius: 8px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+            <p style="margin: 0; font-size: 12px; color: #666; text-transform: uppercase;">Total Vehicles</p>
+            <h3 style="margin: 6px 0 0 0; font-size: 26px; font-weight: 700; color: #2e7d32;">{total_vehicles}</h3>
+          </div>
+          <div style="background: white; padding: 16px; border-radius: 8px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+            <p style="margin: 0; font-size: 12px; color: #666; text-transform: uppercase;">Locations</p>
+            <h3 style="margin: 6px 0 0 0; font-size: 26px; font-weight: 700; color: #2e7d32;">{total_locations}</h3>
+          </div>
+          <div style="background: white; padding: 16px; border-radius: 8px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+            <p style="margin: 0; font-size: 12px; color: #666; text-transform: uppercase;">Avg/Location</p>
+            <h3 style="margin: 6px 0 0 0; font-size: 26px; font-weight: 700; color: #2e7d32;">₹{round(avg_per_location):,}</h3>
+          </div>
+        </div>
+        
+        <!-- Location Performance Comparison -->
+        <div style="margin-top: 20px; background: white; padding: 16px; border-radius: 8px;">
+          <h3 style="margin: 0 0 12px 0; font-size: 16px; color: #333;">Location Performance Comparison</h3>
+          <table style="width: 100%; border-collapse: collapse;">
+            <thead>
+              <tr style="background-color: #f5f5f5;">
+                <th style="padding: 8px; text-align: left; font-size: 12px; border-bottom: 1px solid #ddd;">Location</th>
+                <th style="padding: 8px; text-align: right; font-size: 12px; border-bottom: 1px solid #ddd;">Revenue</th>
+                <th style="padding: 8px; text-align: center; font-size: 12px; border-bottom: 1px solid #ddd;">Vehicles</th>
+                <th style="padding: 8px; text-align: right; font-size: 12px; border-bottom: 1px solid #ddd;">% of Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {''.join(f"""
+              <tr>
+                <td style="padding: 8px; border-bottom: 1px solid #e9ecef; font-size: 13px;">{data['location_name']}</td>
+                <td style="padding: 8px; border-bottom: 1px solid #e9ecef; text-align: right; font-weight: 600; font-size: 13px;">₹{data['analysis']['totalRevenue']:,}</td>
+                <td style="padding: 8px; border-bottom: 1px solid #e9ecef; text-align: center; font-size: 13px;">{data['analysis']['totalVehicles']}</td>
+                <td style="padding: 8px; border-bottom: 1px solid #e9ecef; text-align: right; font-size: 13px;">{(data['analysis']['totalRevenue']/total_revenue*100):.1f}%</td>
+              </tr>
+              """ for data in location_data.values())}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      
+      <!-- Individual Location Reports -->
+      <h2 style="color: #333; font-size: 24px; margin: 0 0 20px 0; text-align: center; border-bottom: 2px solid #667eea; padding-bottom: 12px;">📍 Location-wise Detailed Reports</h2>
+      
+      {''.join(location_sections)}
+      
+      <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; border-left: 4px solid #667eea; margin-top: 20px;">
+        <p style="margin: 0; color: #666; font-size: 14px;">
+          🔎 This email includes separate CSV attachments for each location with detailed transaction data, payment breakdowns, and service analysis.
+        </p>
+      </div>
+      
+    </div>
+    
+    <div style="background-color: #f8f9fa; padding: 20px 24px; border-top: 1px solid #e9ecef; text-align: center;">
+      <p style="margin: 0; color: #6c757d; font-size: 12px;">
+        Report generated on {datetime.now().strftime("%d/%m/%Y at %H:%M")}
+      </p>
+    </div>
+    
+  </div>
+</body>
+</html>
+    """.strip()
+    
+    # Wrap in MIME message
+    msg = MIMEMultipart('related')
+    msg.attach(MIMEText(html, 'html', 'utf-8'))
+    return msg
 
 
 def fetch_today_filtered_logs(location_id: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -671,7 +999,7 @@ def send_reports():
         
         from_email = os.getenv('SES_VERIFIED_FROM')
         
-    # Validate email format
+        # Validate email format
         email_regex = r'^[^\s@]+@[^\s@]+\.[^\s@]+'
         clean_email = re.search(r'<([^>]+)>', from_email)
         clean_email = clean_email.group(1) if clean_email else from_email
@@ -696,8 +1024,7 @@ def send_reports():
         
         logger.info(f"Found {len(locations)} locations")
         
-    # Fetch ALL owners (not just test mode)
-    # Note: users table uses first_name and last_name instead of a single `name` column
+        # Fetch ALL owners (not just test mode)
         response = supabase.table('users').select('id,email,assigned_location,role,first_name,last_name,templateno').eq('role', 'owner').execute()
         owners = response.data
         
@@ -732,69 +1059,91 @@ def send_reports():
                 })
                 continue
             
-            # Get template number for this owner (default to 1)
-            owner_template_no = owner.get('templateno', 1)
-            if owner_template_no is None:
-                owner_template_no = 1
+            # Get all locations for this owner
+            owner_location_ids = get_owner_locations(owner, locations)
             
-            # Determine location context
-            current_location = owner.get('assigned_location')
-            
-            logger.info(f"Processing owner {owner['email']} (Location: {current_location or 'All locations'}, Template: {owner_template_no})")
-            
-            # Fetch logs for this owner
-            try:
-                owner_today_logs = fetch_today_filtered_logs(current_location)
-            except Exception as e:
-                logger.error(f"Failed to fetch logs for owner {owner['email']}: {e}")
-                emails_failed += 1
+            if not owner_location_ids:
+                logger.info(f"Skipping owner {owner['email']}: no locations assigned")
+                emails_skipped += 1
                 email_results.append({
                     'owner': get_owner_display_name(owner),
                     'email': owner['email'],
-                    'status': 'failed',
-                    'error': f"Failed to fetch data: {str(e)}",
-                    'templateUsed': owner_template_no
+                    'status': 'skipped',
+                    'reason': 'No locations assigned'
                 })
                 continue
             
-            # Determine location name
-            location_name = "All Locations"
-            if current_location:
-                for loc in locations:
-                    if loc['id'] == current_location:
-                        location_name = loc['name']
-                        break
+            owner_template_no = owner.get('templateno', 1) or 1
+            is_multi_location = len(owner_location_ids) > 1
             
-            # Send no-data email if no logs
-            if len(owner_today_logs) == 0:
-                logger.info(f"Sending no-data notification to admin inbox (a6hinandh@gmail.com) for {location_name}")
+            logger.info(f"Processing owner {owner['email']} - {len(owner_location_ids)} location(s), Template {owner_template_no}")
+            
+            # Fetch data for each location
+            location_data = {}
+            has_any_data = False
+            all_logs = []
+            
+            for location_id in owner_location_ids:
                 try:
-                    no_data_html = generate_no_data_email_html(location_name, today_str, None)
+                    location_logs = fetch_today_filtered_logs(location_id)
+                    
+                    # Find location name
+                    location_name = "Unknown Location"
+                    for loc in locations:
+                        if loc['id'] == location_id:
+                            location_name = loc['name']
+                            break
+                    
+                    if len(location_logs) > 0:
+                        has_any_data = True
+                        all_logs.extend(location_logs)
+                        
+                        # Generate analysis for this location
+                        analysis = analyze_data(location_logs, locations)
+                        
+                        location_data[location_id] = {
+                            'analysis': analysis,
+                            'logs': location_logs,
+                            'location_name': location_name
+                        }
+                        
+                        logger.info(f"  - {location_name}: {len(location_logs)} records, ₹{analysis['totalRevenue']:,}")
+                    else:
+                        logger.info(f"  - {location_name}: No data")
+                        
+                except Exception as e:
+                    logger.error(f"Failed to fetch logs for location {location_id}: {e}")
+            
+            # If no data at all locations, send no-data email
+            if not has_any_data:
+                logger.info(f"No data across all locations for {owner['email']}")
+                try:
+                    location_names = ", ".join([loc['name'] for loc in locations if loc['id'] in owner_location_ids])
+                    no_data_html = generate_no_data_email_html(location_names, today_str, None)
                     no_data_text = f"""No Data Report - {today_str}
 
-Location: {location_name}
-Status: No approved transactions recorded for today.
+Locations: {location_names}
+Status: No approved transactions recorded for today across all assigned locations.
 
 Generated on: {datetime.now().strftime("%d/%m/%Y at %H:%M")}"""
                     
                     send_email_with_attachments_ses(
                         from_email,
                         owner['email'],
-                        f"No Data Today - {today_str} - {location_name}",
+                        f"No Data Today - {today_str}",
                         no_data_html,
                         no_data_text,
                         []
                     )
                     
                     emails_sent += 1
-                    logger.info(f"No-data email sent to admin inbox (a6hinandh@gmail.com)")
                     email_results.append({
                         'owner': get_owner_display_name(owner),
                         'email': owner['email'],
                         'status': 'success',
                         'recordCount': 0,
                         'revenue': 0,
-                        'location': location_name,
+                        'locations': len(owner_location_ids),
                         'emailType': 'no-data',
                         'templateUsed': owner_template_no
                     })
@@ -810,83 +1159,97 @@ Generated on: {datetime.now().strftime("%d/%m/%Y at %H:%M")}"""
                     })
                 continue
             
-            # Send full report
+            # Send report with data
             try:
-                logger.info(f"Processing {owner['email']} - {len(owner_today_logs)} approved records for {location_name} (Template {owner_template_no})")
+                # Generate appropriate HTML based on location count
+                if is_multi_location:
+                    # Multi-location report
+                    html_content = generate_multi_location_report_html(
+                        location_data, locations, today_str, owner_template_no
+                    )
+                    subject_suffix = f"{len(location_data)} Locations"
+                else:
+                    # Single location report (use existing templates)
+                    single_location_data = list(location_data.values())[0]
+                    analysis = single_location_data['analysis']
+                    location_name = single_location_data['location_name']
+                    
+                    html_content = generate_email_html(analysis, location_name, today_str, owner_template_no)
+                    subject_suffix = location_name
                 
-                # Generate analysis
-                analysis = analyze_data(owner_today_logs, locations)
+                # Generate CSV attachments for each location
+                attachments = []
+                date_str = datetime.now().strftime("%Y-%m-%d")
                 
-                # Generate CSVs
-                report_csv = generate_report_csv(owner_today_logs, locations)
-                payment_csv = generate_payment_breakdown_csv(owner_today_logs)
-                service_csv = generate_service_breakdown_csv(owner_today_logs)
+                for location_id, data in location_data.items():
+                    location_safe = re.sub(r'[^a-zA-Z0-9]', '-', data['location_name']).lower()
+                    
+                    report_csv = generate_report_csv(data['logs'], locations)
+                    payment_csv = generate_payment_breakdown_csv(data['logs'])
+                    service_csv = generate_service_breakdown_csv(data['logs'])
+                    
+                    attachments.extend([
+                        {
+                            'filename': f"report_{date_str}_{location_safe}.csv",
+                            'content': report_csv
+                        },
+                        {
+                            'filename': f"payment_{date_str}_{location_safe}.csv",
+                            'content': payment_csv
+                        },
+                        {
+                            'filename': f"service_{date_str}_{location_safe}.csv",
+                            'content': service_csv
+                        }
+                    ])
                 
-                # Generate HTML with owner's template
-                html_content = generate_email_html(analysis, location_name, today_str, owner_template_no)
+                # Calculate totals
+                total_revenue_owner = sum(d['analysis']['totalRevenue'] for d in location_data.values())
+                total_records_owner = len(all_logs)
                 
                 # Generate text version
                 text_content = f"""{'Business Intelligence Report' if owner_template_no == 3 else 'Daily Business Report'} - {today_str}
 
-Location: {location_name}
-Total Revenue: ₹{analysis['totalRevenue']:,}  
-{'Transactions' if owner_template_no == 3 else 'Vehicles Served'}: {analysis['totalVehicles']}
-Average {'Transaction' if owner_template_no == 3 else 'Service'}: ₹{round(analysis['avgService'])}
+{'Multi-Location Report' if is_multi_location else subject_suffix}
+Total Locations: {len(location_data)}
+Total Revenue: ₹{total_revenue_owner:,}
+Total Transactions: {total_records_owner}
 
-PAYMENT BREAKDOWN:
-{chr(10).join(f"{item['mode']}: ₹{item['revenue']:,} ({item['count']} {'transactions' if owner_template_no == 3 else 'vehicles'}, {item['percentage']:.1f}%)" for item in analysis['paymentModeBreakdown'])}
+LOCATION BREAKDOWN:
+{chr(10).join(f"{data['location_name']}: ₹{data['analysis']['totalRevenue']:,} ({data['analysis']['totalVehicles']} vehicles)" for data in location_data.values())}
 
-SERVICE BREAKDOWN:
-{chr(10).join(f"{item['service']}: {item['count']} {'services' if owner_template_no == 3 else 'vehicles'}, ₹{item['revenue']:,} revenue (avg ₹{round(item['price'])})" for item in analysis['serviceBreakdown'])}
-
-Template Used: {owner_template_no} {'(Modern Business Intelligence)' if owner_template_no == 3 else ''}
+Template Used: {owner_template_no}
 Generated on: {datetime.now().strftime("%d/%m/%Y at %H:%M")}"""
                 
-                # Prepare attachments
-                location_safe = re.sub(r'[^a-zA-Z0-9]', '-', location_name).lower()
-                date_str = today.strftime("%Y-%m-%d")
-                attachments = [
-                    {
-                        'filename': f"{'transaction_report' if owner_template_no == 3 else 'daily_report'}_{date_str}_{location_safe}.csv",
-                        'content': report_csv
-                    },
-                    {
-                        'filename': f"payment_{'analytics' if owner_template_no == 3 else 'breakdown'}_{date_str}_{location_safe}.csv",
-                        'content': payment_csv
-                    },
-                    {
-                        'filename': f"service_{'performance' if owner_template_no == 3 else 'breakdown'}_{date_str}_{location_safe}.csv",
-                        'content': service_csv
-                    }
-                ]
-                
-                # Send email using SES API
+                # Send email
                 send_email_with_attachments_ses(
                     from_email,
                     owner['email'],
-                    f"{'Business Intelligence Report' if owner_template_no == 3 else 'Daily Report'} - {today_str} - {location_name}",
+                    f"{'Business Intelligence Report' if owner_template_no == 3 else 'Daily Report'} - {today_str} - {subject_suffix}",
                     html_content,
                     text_content,
                     attachments
                 )
                 
                 emails_sent += 1
-                total_revenue_summary += analysis['totalRevenue']
-                total_records_summary += len(owner_today_logs)
+                total_revenue_summary += total_revenue_owner
+                total_records_summary += total_records_owner
                 
-                logger.info(f"Email sent to {owner['email']} ({len(owner_today_logs)} approved records, ₹{analysis['totalRevenue']:,}, {len(attachments)} attachments, Template {owner_template_no})")
+                logger.info(f"Email sent to {owner['email']} ({len(location_data)} location(s), {total_records_owner} records, ₹{total_revenue_owner:,}, Template {owner_template_no})")
                 
                 email_results.append({
                     'owner': get_owner_display_name(owner),
                     'email': owner['email'],
                     'status': 'success',
-                    'recordCount': len(owner_today_logs),
-                    'revenue': analysis['totalRevenue'],
-                    'location': location_name,
+                    'recordCount': total_records_owner,
+                    'revenue': total_revenue_owner,
+                    'locations': len(location_data),
+                    'locationNames': ', '.join([d['location_name'] for d in location_data.values()]),
                     'attachments': len(attachments),
                     'templateUsed': owner_template_no,
-                    'emailType': 'full-report'
+                    'emailType': 'multi-location' if is_multi_location else 'single-location'
                 })
+                
             except Exception as e:
                 logger.error(f"Failed to send email to {owner['email']}: {e}")
                 emails_failed += 1
@@ -955,6 +1318,7 @@ Generated on: {datetime.now().strftime("%d/%m/%Y at %H:%M")}"""
             'filteringApproach': 'Database-level filtering',
             'authMethod': 'Bearer token authentication',
             'deliveryMethod': 'AWS SES API',
+            'multiLocationSupport': 'Enabled',
             'results': email_results
         }), 200
         
@@ -965,14 +1329,20 @@ Generated on: {datetime.now().strftime("%d/%m/%Y at %H:%M")}"""
             'error': str(err),
             'filteringApproach': 'Database-level filtering',
             'authMethod': 'Bearer token authentication',
-            'deliveryMethod': 'AWS SES API'
+            'deliveryMethod': 'AWS SES API',
+            'multiLocationSupport': 'Enabled'
         }), 500
 
 
 @app.route('/health', methods=['GET'])
 def health():
     """Health check endpoint"""
-    return jsonify({'status': 'healthy', 'service': 'daily-reports', 'delivery': 'AWS SES API'}), 200
+    return jsonify({
+        'status': 'healthy', 
+        'service': 'daily-reports', 
+        'delivery': 'AWS SES API',
+        'features': 'Multi-location support enabled'
+    }), 200
 
 
 if __name__ == '__main__':
