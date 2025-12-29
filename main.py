@@ -16,11 +16,12 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email import encoders
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone, time
 import os
 import re
 from typing import List, Dict, Any, Optional
 import logging
+import pytz
 
 # Initialize Supabase client with custom options
 from supabase.lib.client_options import ClientOptions
@@ -57,6 +58,43 @@ LOGS_TABLE = os.getenv("SUPABASE_LOGS_TABLE", "log-man")
 
 # Initialize AWS SES client
 ses_client = None
+
+# Timezone configuration (fix 5:30 hrs behind by using IST everywhere)
+IST_TZ = pytz.timezone('Asia/Kolkata')
+
+def now_ist() -> datetime:
+    return datetime.now(timezone.utc).astimezone(IST_TZ)
+
+def format_now_ist(fmt: str = "%d/%m/%Y at %H:%M") -> str:
+    return now_ist().strftime(fmt)
+
+def ist_day_utc_bounds(target_dt_ist: Optional[datetime] = None) -> (str, str):
+    """Return ISO UTC start/end of the day for IST calendar day.
+
+    This ensures daily reports align with India time (UTC+05:30).
+    """
+    dt_ist = target_dt_ist or now_ist()
+    day = dt_ist.date()
+    start_ist = IST_TZ.localize(datetime.combine(day, time(0, 0, 0)))
+    end_ist = start_ist + timedelta(days=1)
+    start_utc = start_ist.astimezone(timezone.utc).isoformat()
+    end_utc = end_ist.astimezone(timezone.utc).isoformat()
+    return start_utc, end_utc
+
+def parse_iso_to_ist(iso_str: str) -> datetime:
+    if not iso_str:
+        return now_ist()
+    # Ensure timezone-aware parsing (treat 'Z' as UTC)
+    try:
+        dt = datetime.fromisoformat(iso_str.replace('Z', '+00:00'))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(IST_TZ)
+    except Exception:
+        return now_ist()
+
+def format_iso_as_ist(iso_str: str, fmt: str = "%d/%m/%Y %H:%M") -> str:
+    return parse_iso_to_ist(iso_str).strftime(fmt)
 
 def get_ses_client():
     """Initialize and return SES client"""
@@ -163,9 +201,9 @@ def generate_no_data_email_html(location_names: str, today_str: str) -> MIMEMult
     </div>
     
     <div style="background-color: #f8f9fa; padding: 20px 24px; border-top: 1px solid #e9ecef; text-align: center;">
-      <p style="margin: 0; color: #6c757d; font-size: 12px;">
-        Report generated on {datetime.now().strftime("%d/%m/%Y at %H:%M")}
-      </p>
+            <p style="margin: 0; color: #6c757d; font-size: 12px;">
+                Report generated on {format_now_ist()}
+            </p>
     </div>
     
   </div>
@@ -200,7 +238,7 @@ def fetch_today_filtered_logs(location_id: Optional[str] = None) -> List[Dict[st
     select_cols = (
         "id,created_at,approval_status,entry_time,exit_time,entry_type,service,"
         "payment_mode,amount,discount,total,loc_id,veh_id,cust_id,"
-        "vehicle:veh_id(id,number_plate,type),"
+        "vehicle:veh_id(id,number_plate,type,veh_det),"
         "cust:cust_id(id,name,phone)"
     )
 
@@ -211,11 +249,8 @@ def fetch_today_filtered_logs(location_id: Optional[str] = None) -> List[Dict[st
         # In new schema, location is stored as `loc_id`
         query = query.eq('loc_id', location_id)
 
-    # Date range: entire day from 00:00 to < next day 00:00 (server local time)
-    now = datetime.now()
-    today = datetime(now.year, now.month, now.day)
-    start_of_day = today.isoformat()
-    end_of_day = (today + timedelta(days=1)).isoformat()
+    # Date range: IST day boundaries converted to UTC
+    start_of_day, end_of_day = ist_day_utc_bounds()
 
     query = query.gte('created_at', start_of_day).lt('created_at', end_of_day)
 
@@ -230,6 +265,19 @@ def fetch_today_filtered_logs(location_id: Optional[str] = None) -> List[Dict[st
             raise Exception(f"Failed to fetch logs: {response.error}")
 
         rows = response.data or []
+
+        # Prefetch vehicle models via veh_det from Vehicles_in_india
+        veh_det_ids = list({(r.get('vehicle') or {}).get('veh_det') for r in rows if (r.get('vehicle') or {}).get('veh_det')})
+        models_map: Dict[str, Any] = {}
+        if veh_det_ids:
+            try:
+                # Column name has capital letter and space-sensitive schema -> quote the column
+                model_resp = supabase.table('Vehicles_in_india').select('id,"Models"').in_('id', veh_det_ids).execute()
+                for m in (model_resp.data or []):
+                    # Map model text from "Models" column
+                    models_map[m.get('id')] = m.get('Models')
+            except Exception as me:
+                logger.warning(f"Failed to fetch vehicle models: {me}")
 
         def map_row(row: Dict[str, Any]) -> Dict[str, Any]:
             vehicle = (row or {}).get('vehicle') or {}
@@ -266,7 +314,7 @@ def fetch_today_filtered_logs(location_id: Optional[str] = None) -> List[Dict[st
                 'Phone_no': cust.get('phone'),
                 # Fields that may not exist in new schema but are referenced safely
                 'upi_account_name': row.get('upi_account_name'),
-                'vehicle_model': row.get('vehicle_model'),
+                'vehicle_model': models_map.get(vehicle.get('veh_det')),
                 'remarks': row.get('remarks'),
                 'image_url': row.get('image_url'),
                 'workshop': row.get('workshop'),
@@ -388,7 +436,7 @@ def analyze_data(logs: List[Dict[str, Any]], locations: List[Dict[str, Any]]) ->
         })
     
     for log in logs:
-        created = datetime.fromisoformat(log['created_at'].replace('Z', '+00:00'))
+        created = parse_iso_to_ist(log['created_at'])
         hour = created.hour
         hourly_breakdown[hour]['amount'] += log.get('Amount', 0)
         hourly_breakdown[hour]['count'] += 1
@@ -453,7 +501,7 @@ def generate_report_csv(logs: List[Dict[str, Any]], locations: List[Dict[str, An
             "Payment Mode": escape_csv(log.get('payment_mode')),
             "UPI Account": escape_csv(log.get('upi_account_name')),
             "Entry Type": escape_csv(log.get('entry_type')),
-            "Date": escape_csv(datetime.fromisoformat(log['created_at'].replace('Z', '+00:00')).strftime("%d/%m/%Y %H:%M")),
+            "Date": escape_csv(format_iso_as_ist(log['created_at'], "%d/%m/%Y %H:%M")),
             "Location": escape_csv(location_name)
         })
     
@@ -680,9 +728,9 @@ def generate_multi_location_report_html(location_data: Dict[str, Dict[str, Any]]
     </div>
     
     <div style="background-color: #f8f9fa; padding: 20px 24px; border-top: 1px solid #e9ecef; text-align: center;">
-      <p style="margin: 0; color: #6c757d; font-size: 12px;">
-        Report generated on {datetime.now().strftime("%d/%m/%Y at %H:%M")}
-      </p>
+            <p style="margin: 0; color: #6c757d; font-size: 12px;">
+                Report generated on {format_now_ist()}
+            </p>
     </div>
     
   </div>
@@ -823,9 +871,9 @@ def generate_summary_report_html(summary_data: Dict[str, Any], today_str: str) -
     </div>
     
     <div style="background-color: #f8f9fa; padding: 20px 24px; border-top: 1px solid #e9ecef; text-align: center;">
-      <p style="margin: 0; color: #6c757d; font-size: 12px;">
-        Report generated on {datetime.now().strftime("%d/%m/%Y at %H:%M")}
-      </p>
+            <p style="margin: 0; color: #6c757d; font-size: 12px;">
+                Report generated on {format_now_ist()}
+            </p>
     </div>
     
   </div>
@@ -934,6 +982,11 @@ def send_reports():
         request_data = request.get_json() or {}
         scheduled_users = request_data.get('users', [])
         trigger_source = request_data.get('trigger', 'manual')
+        # Testing convenience: allow overriding destination email without hitting Supabase
+        email_override = request_data.get('email_override') or request_data.get('email')
+        templateno_override = request_data.get('templateno')
+        timezone_override = request_data.get('timezone')
+        location_ids_override = request_data.get('location_ids')  # optional list of location IDs
         
         logger.info(f"Trigger source: {trigger_source}")
         logger.info(f"Scheduled users count: {len(scheduled_users)}")
@@ -956,9 +1009,8 @@ def send_reports():
         
         logger.info(f"Using FROM email: {from_email}")
         
-        # Get today's date
-        today = datetime.now()
-        today_str = today.strftime("%d/%m/%Y")
+        # Get today's date in IST (fix 5:30 hrs behind)
+        today_str = now_ist().strftime("%d/%m/%Y")
         
         logger.info(f"Generating reports for date: {today_str}")
         
@@ -975,8 +1027,29 @@ def send_reports():
         
         logger.info(f"Found {len(locations)} locations")
         
-        # Fetch owners based on scheduled users
-        if scheduled_users:
+        # If email_override is provided, bypass Supabase user lookup entirely
+        owners = None
+        if email_override:
+            # Build a synthetic owner object for testing
+            try:
+                templ_no_val = int(templateno_override) if templateno_override is not None else 1
+            except (ValueError, TypeError):
+                templ_no_val = 1
+
+            owners = [{
+                'id': 'override',
+                'email': email_override,
+                'assigned_location': location_ids_override,  # None means all locations
+                'role': 'owner',
+                'first_name': request_data.get('first_name'),
+                'last_name': request_data.get('last_name'),
+                'templateno': templ_no_val,
+                'timezone': timezone_override or 'UTC'
+            }]
+            logger.info(f"Using email_override for testing: {email_override}; template={templ_no_val}; tz={timezone_override or 'UTC'}; locations={(location_ids_override or 'ALL')} ")
+
+        # Fetch owners based on scheduled users (normal flow)
+        if owners is None and scheduled_users:
             # Get only the scheduled users
             user_ids = [user.get('user_id') for user in scheduled_users if user.get('user_id')]
             if not user_ids:
@@ -1027,7 +1100,7 @@ def send_reports():
                     logger.warning(f"No schedule found for user {user_id}, using defaults")
                     owner['templateno'] = 1
                     owner['timezone'] = 'UTC'
-        else:
+        elif owners is None:
             # Fallback: fetch all owners (backward compatibility)
             logger.warning("No scheduled users provided - using backward compatibility mode")
             response = supabase.table('users').select('id,email,assigned_location,role,first_name,last_name').eq('role', 'owner').execute()
@@ -1166,11 +1239,11 @@ Locations: {location_names}
 Status: No approved transactions recorded for today across all assigned locations.
 Timezone: {owner_timezone}
 
-Generated on: {datetime.now().strftime("%d/%m/%Y at %H:%M")}"""
+Generated on: {format_now_ist()}"""
                     
                     send_email_with_attachments_ses(
                         from_email,
-                        'a6hinandh@gmail.com',
+                        owner['email'],
                         f"No Data Today - {today_str}",
                         no_data_html,
                         no_data_text,
@@ -1222,7 +1295,7 @@ Generated on: {datetime.now().strftime("%d/%m/%Y at %H:%M")}"""
                 
                 # Generate CSV attachments for each location
                 attachments = []
-                date_str = datetime.now().strftime("%Y-%m-%d")
+                date_str = now_ist().strftime("%Y-%m-%d")
                 
                 for location_id, data in location_data.items():
                     location_safe = re.sub(r'[^a-zA-Z0-9]', '-', data['location_name']).lower()
@@ -1263,12 +1336,12 @@ LOCATION BREAKDOWN:
 {chr(10).join(f"{data['location_name']}: ₹{data['analysis']['totalRevenue']:,} ({data['analysis']['totalVehicles']} vehicles)" for data in location_data.values())}
 
 Template Used: {owner_template_no}
-Generated on: {datetime.now().strftime("%d/%m/%Y at %H:%M")}"""
+Generated on: {format_now_ist()}"""
                 
                 # Send email
                 send_email_with_attachments_ses(
                     from_email,
-                    'a6hinandh@gmail.com',
+                    owner['email'],
                     f"{'Business Intelligence Report' if owner_template_no == 3 else 'Daily Report'} - {today_str} - {subject_suffix}",
                     html_content,
                     text_content,
@@ -1334,7 +1407,7 @@ Total Users: {len(owners) if owners else 0}
 Total Revenue: ₹{total_revenue_summary:,}
 Total Records: {total_records_summary}
 
-Generated on: {datetime.now().strftime("%d/%m/%Y at %H:%M")}"""
+Generated on: {format_now_ist()}"""
             
             send_email_with_attachments_ses(
                 from_email,
@@ -1388,6 +1461,174 @@ Generated on: {datetime.now().strftime("%d/%m/%Y at %H:%M")}"""
             'templateSource': 'user_schedules table'
         }), 500
 
+@app.route('/dev/send-reports', methods=['GET', 'POST'])
+def dev_send_reports():
+    """Temporary local-only route to manually test report generation.
+
+    - No auth required (proxies to /send-reports with a generated Bearer token)
+    - Only available when ENABLE_DEV_ROUTE=true
+    - Restricted to localhost requests (127.0.0.1 or ::1)
+    """
+
+    # Feature toggle: keep disabled by default to avoid exposure
+    if (os.getenv('ENABLE_DEV_ROUTE', 'false').lower() != 'true'):
+        return jsonify({'success': False, 'error': 'Dev route disabled'}), 404
+
+    # Local-only guard
+    remote_ip = (request.remote_addr or '').strip()
+    if remote_ip not in ('127.0.0.1', '::1'):
+        return jsonify({'success': False, 'error': 'Forbidden - local only'}), 403
+
+    # Prepare request payload (optional JSON body like /send-reports)
+    req_json = {}
+    try:
+        if request.is_json:
+            req_json = request.get_json() or {}
+    except Exception:
+        req_json = {}
+    req_json.setdefault('trigger', 'dev')
+
+    # Generate an internal Authorization token using local env keys
+    token = os.getenv('SUPABASE_SERVICE_ROLE_KEY') or os.getenv('SUPABASE_ANON_KEY') or ''
+    if not token:
+        return jsonify({'success': False, 'error': 'Missing Supabase keys (SERVICE_ROLE_KEY/ANON_KEY) in environment'}), 500
+
+    # Proxy the request to the existing /send-reports handler within a test context
+    with app.test_request_context(
+        '/send-reports',
+        method='POST',
+        json=req_json,
+        headers={'Authorization': f'Bearer {token}'}
+    ):
+        return send_reports()
+
+@app.route('/dev', methods=['GET'])
+def dev_ui():
+        """Temporary local-only UI to trigger report generation from the browser.
+
+        - Enabled only when ENABLE_DEV_ROUTE=true
+        - Restricted to localhost requests (127.0.0.1 or ::1)
+        - Provides a simple HTML form that posts to /dev/send-reports
+        """
+
+        if (os.getenv('ENABLE_DEV_ROUTE', 'false').lower() != 'true'):
+                return jsonify({'success': False, 'error': 'Dev route disabled'}), 404
+
+        remote_ip = (request.remote_addr or '').strip()
+        if remote_ip not in ('127.0.0.1', '::1'):
+                return jsonify({'success': False, 'error': 'Forbidden - local only'}), 403
+
+        html = f"""
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dev: Send Reports</title>
+    <style>
+        body {{ font-family: -apple-system, Segoe UI, Tahoma, Arial, sans-serif; background:#f7f7fb; margin:0; }}
+        .wrap {{ max-width: 900px; margin: 40px auto; background:#fff; border-radius: 12px; box-shadow: 0 6px 20px rgba(0,0,0,0.08); overflow:hidden; }}
+        header {{ background: linear-gradient(135deg,#667eea,#764ba2); color:#fff; padding: 24px; }}
+        header h1 {{ margin:0; font-size: 22px; }}
+        main {{ padding: 24px; }}
+        .grid {{ display:grid; grid-template-columns: 1fr 1fr; gap: 16px; }}
+        .card {{ background:#fafbff; border:1px solid #e8eaf6; border-radius:10px; padding:16px; }}
+        label {{ display:block; font-size:12px; color:#555; margin-bottom:6px; text-transform:uppercase; letter-spacing:0.04em; }}
+        input, textarea {{ width:100%; box-sizing:border-box; padding:10px 12px; border:1px solid #dfe3f0; border-radius:8px; font-size:14px; }}
+        textarea {{ min-height:76px; }}
+        .actions {{ display:flex; gap:12px; margin-top:16px; }}
+        button {{ background:#667eea; color:#fff; border:none; border-radius:8px; padding:10px 14px; font-weight:600; cursor:pointer; }}
+        button.secondary {{ background:#4caf50; }}
+        pre {{ background:#0b1021; color:#d6e3ff; border-radius:10px; padding:16px; overflow:auto; max-height:320px; }}
+        .note {{ font-size:12px; color:#777; margin-top:8px; }}
+    </style>
+    <script>
+        async function postDev(usersArr, triggerVal) {{
+            const emailOverride = (document.getElementById('emailOverride').value || '').trim();
+            const templateno = (document.getElementById('templateno').value || '').trim();
+            const timezone = (document.getElementById('timezone').value || '').trim();
+            const locationsRaw = (document.getElementById('locationIds').value || '').trim();
+            const location_ids = locationsRaw ? locationsRaw.split(',').map(s => s.trim()).filter(Boolean) : undefined;
+
+            const body = usersArr.length > 0 ? {{ users: usersArr, trigger: triggerVal }} : {{ trigger: triggerVal }};
+            if (emailOverride) body.email_override = emailOverride;
+            if (templateno) body.templateno = templateno;
+            if (timezone) body.timezone = timezone;
+            if (location_ids && location_ids.length) body.location_ids = location_ids;
+            const res = await fetch('/dev/send-reports', {{
+                method: 'POST',
+                headers: {{ 'Content-Type': 'application/json' }},
+                body: JSON.stringify(body)
+            }});
+            const text = await res.text();
+            document.getElementById('output').textContent = text;
+        }}
+        function handleSubmitSpecified() {{
+            const idsRaw = document.getElementById('ownerIds').value || '';
+            const trigger = document.getElementById('trigger').value || 'dev';
+            const ids = idsRaw.split(',').map(s => s.trim()).filter(Boolean);
+            const users = ids.map(id => ({{ user_id: id }}));
+            postDev(users, trigger);
+        }}
+        function handleSubmitAll() {{
+            const trigger = document.getElementById('trigger').value || 'dev';
+            postDev([], trigger);
+        }}
+    </script>
+    </head>
+    <body>
+        <div class="wrap">
+            <header>
+                <h1>Dev: Manual Daily Reports Trigger</h1>
+                <div class="note">Local-only, no auth. Enabled: {os.getenv('ENABLE_DEV_ROUTE','false')}</div>
+            </header>
+            <main>
+                <div class="grid">
+                    <div class="card">
+                        <label for="ownerIds">Owner IDs (comma-separated)</label>
+                        <textarea id="ownerIds" placeholder="uuid-1, uuid-2"></textarea>
+                        <div class="note">Leave empty to process ALL owners.</div>
+
+                        <label for="emailOverride" style="margin-top:10px;">Email Override (testing)</label>
+                        <input id="emailOverride" placeholder="test@example.com" />
+                        <div class="note">If provided, bypasses Supabase user lookup and sends to this email.</div>
+
+                        <div class="grid" style="grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 10px;">
+                            <div>
+                                <label for="templateno">Template No</label>
+                                <input id="templateno" placeholder="1" />
+                            </div>
+                            <div>
+                                <label for="timezone">Timezone</label>
+                                <input id="timezone" placeholder="UTC" />
+                            </div>
+                        </div>
+
+                        <label for="locationIds" style="margin-top:10px;">Location IDs (comma-separated)</label>
+                        <textarea id="locationIds" placeholder="loc-1, loc-2"></textarea>
+                        <div class="note">Leave empty to include ALL locations.</div>
+
+                        <label for="trigger" style="margin-top:10px;">Trigger</label>
+                        <input id="trigger" value="dev" />
+
+                        <div class="actions">
+                            <button onclick="handleSubmitSpecified()">Process specified owners</button>
+                            <button class="secondary" onclick="handleSubmitAll()">Process ALL owners</button>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <label>Response</label>
+                        <pre id="output">(results will appear here)</pre>
+                        <div class="note">Endpoint: /dev/send-reports → proxies to /send-reports</div>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </body>
+</html>
+        """
+        return html
+
 @app.route('/health', methods=['GET'])
 def health():
     """Health check endpoint"""
@@ -1400,6 +1641,59 @@ def health():
 
 
 if __name__ == '__main__':
+    # Optional CLI test mode: prompt for UUID/email and invoke send_reports once, then exit.
+    if (os.getenv('CLI_TEST', 'false').lower() == 'true'):
+        # Read from environment if provided; otherwise prompt
+        cli_uuid = (os.getenv('CLI_UUID') or '').strip()
+        cli_email = (os.getenv('CLI_EMAIL') or '').strip()
+        cli_template = (os.getenv('CLI_TEMPLATE') or '').strip()
+        cli_timezone = (os.getenv('CLI_TIMEZONE') or 'UTC').strip()
+        cli_locations_raw = (os.getenv('CLI_LOCATIONS') or '').strip()
+
+        if not cli_uuid:
+            try:
+                cli_uuid = input('Enter user UUID (optional, press Enter to skip): ').strip()
+            except Exception:
+                cli_uuid = ''
+        if not cli_email:
+            try:
+                cli_email = input('Enter email to send report to: ').strip()
+            except Exception:
+                cli_email = ''
+
+        payload = {'trigger': 'cli'}
+        if cli_uuid:
+            payload['users'] = [{'user_id': cli_uuid}]
+        if cli_email:
+            payload['email_override'] = cli_email
+        if cli_template:
+            payload['templateno'] = cli_template
+        if cli_timezone:
+            payload['timezone'] = cli_timezone
+        if cli_locations_raw:
+            # Accept comma-separated IDs
+            payload['location_ids'] = [s.strip() for s in cli_locations_raw.split(',') if s.strip()]
+
+        token = os.getenv('SUPABASE_SERVICE_ROLE_KEY') or os.getenv('SUPABASE_ANON_KEY') or ''
+        if not token:
+            print('Missing Supabase keys (SERVICE_ROLE_KEY/ANON_KEY) in environment')
+            raise SystemExit(1)
+
+        with app.test_request_context(
+            '/send-reports',
+            method='POST',
+            json=payload,
+            headers={'Authorization': f'Bearer {token}'}
+        ):
+            resp, status = send_reports()
+            # Flask view returns (Response, status_code)
+            print(f"CLI Test completed with status {status}")
+            try:
+                print(resp.get_json())
+            except Exception:
+                print(resp)
+        raise SystemExit(0)
+
     port = int(os.getenv('PORT', 5000))
     # Configure Flask with timeout settings for Render deployment
     app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
