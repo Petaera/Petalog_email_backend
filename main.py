@@ -52,6 +52,9 @@ url = os.environ.get("SUPABASE_URL")
 key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
 supabase: Client = create_client(url, key, options=options)
 
+# Table names (configurable for schema changes)
+LOGS_TABLE = os.getenv("SUPABASE_LOGS_TABLE", "log-man")
+
 # Initialize AWS SES client
 ses_client = None
 
@@ -177,46 +180,101 @@ def generate_no_data_email_html(location_names: str, today_str: str) -> MIMEMult
 
 
 def fetch_today_filtered_logs(location_id: Optional[str] = None) -> List[Dict[str, Any]]:
-    """Fetch today's filtered logs using database-level filtering.
-    
-    Fetches logs from start of day (12 AM) to end of day (11:59 PM).
-    This is the OLD VERSION logic - fetches entire day's data regardless of request time.
-    
+    """Fetch today's approved logs with joins to new split tables.
+
+    New schema: main table `log-man` with FKs to `vehicle` and `cust`.
+    We join needed fields and map results back to legacy keys used by
+    analysis and CSV functions to avoid broad code changes.
+
     Args:
-        location_id: Optional location ID to filter by
-    
+        location_id: Optional location ID to filter by (maps to `loc_id`).
+
     Returns:
-        List of log dictionaries matching the criteria
+        List of dicts shaped like the old `logs-man` rows (selected fields).
     """
-    logger.info(f"Fetching today's logs for location: {location_id or 'All locations'}")
-    
-    query = supabase.table('logs-man').select('*')
+    logger.info(f"Fetching today's logs (new schema) for location: {location_id or 'All locations'}")
+
+    # Build base query from configurable logs table
+    # Join related tables for vehicle and customer details
+    # PostgREST join syntax via select: alias:fk_column(*)
+    select_cols = (
+        "id,created_at,approval_status,entry_time,exit_time,entry_type,service,"
+        "payment_mode,amount,discount,total,loc_id,veh_id,cust_id,"
+        "vehicle:veh_id(id,number_plate,type),"
+        "cust:cust_id(id,name,phone)"
+    )
+
+    query = supabase.table(LOGS_TABLE).select(select_cols)
     query = query.eq('approval_status', 'approved')
-    
+
     if location_id:
-        query = query.eq('location_id', location_id)
-    
-    # Get today's date range (entire day from 12 AM to 11:59 PM)
+        # In new schema, location is stored as `loc_id`
+        query = query.eq('loc_id', location_id)
+
+    # Date range: entire day from 00:00 to < next day 00:00 (server local time)
     now = datetime.now()
     today = datetime(now.year, now.month, now.day)
     start_of_day = today.isoformat()
     end_of_day = (today + timedelta(days=1)).isoformat()
-    
-    # Query: Get logs for the entire day
+
     query = query.gte('created_at', start_of_day).lt('created_at', end_of_day)
-    
-    logger.info(f"Filtering for date range: {start_of_day} to {end_of_day} (location: {location_id or 'all'})")
-    
+
+    logger.info(
+        f"Filtering for date range: {start_of_day} to {end_of_day} (table: {LOGS_TABLE}, location: {location_id or 'all'})"
+    )
+
     try:
         response = query.execute()
-        
         if hasattr(response, 'error') and response.error:
-            logger.error(f'Error fetching filtered logs: {response.error}')
+            logger.error(f"Error fetching filtered logs: {response.error}")
             raise Exception(f"Failed to fetch logs: {response.error}")
-        
-        logs = response.data or []
-        logger.info(f"Found {len(logs)} approved logs for today")
-        
+
+        rows = response.data or []
+
+        def map_row(row: Dict[str, Any]) -> Dict[str, Any]:
+            vehicle = (row or {}).get('vehicle') or {}
+            cust = (row or {}).get('cust') or {}
+
+            amount_val = None
+            if row.get('amount') is not None:
+                amount_val = row.get('amount')
+            elif row.get('Total') is not None:
+                amount_val = row.get('Total')
+            elif row.get('total') is not None:
+                amount_val = row.get('total')
+
+            mapped = {
+                # Keep most original keys so downstream code works unchanged
+                'id': row.get('id'),
+                'created_at': row.get('created_at'),
+                'approval_status': row.get('approval_status'),
+                'entry_time': row.get('entry_time'),
+                'exit_time': row.get('exit_time'),
+                'entry_type': row.get('entry_type'),
+                'service': row.get('service'),
+                'payment_mode': row.get('payment_mode'),
+                'Amount': amount_val,  # legacy key expected by analysis/CSV
+                'discount': row.get('discount'),
+                # Map new schema FKs to legacy field names
+                'location_id': row.get('loc_id') or row.get('location_id'),
+                'vehicle_id': row.get('veh_id') or row.get('vehicle_id'),
+                'customer_id': row.get('cust_id') or row.get('customer_id'),
+                # Flatten joined details to legacy names
+                'vehicle_number': vehicle.get('number_plate'),
+                'vehicle_type': vehicle.get('type'),
+                'Name': cust.get('name'),
+                'Phone_no': cust.get('phone'),
+                # Fields that may not exist in new schema but are referenced safely
+                'upi_account_name': row.get('upi_account_name'),
+                'vehicle_model': row.get('vehicle_model'),
+                'remarks': row.get('remarks'),
+                'image_url': row.get('image_url'),
+                'workshop': row.get('workshop'),
+            }
+            return mapped
+
+        logs = [map_row(r) for r in rows]
+        logger.info(f"Found {len(logs)} approved logs for today (new schema)")
         return logs
     except Exception as e:
         logger.error(f"Error fetching logs for location {location_id}: {e}")
@@ -1112,7 +1170,7 @@ Generated on: {datetime.now().strftime("%d/%m/%Y at %H:%M")}"""
                     
                     send_email_with_attachments_ses(
                         from_email,
-                        owner['email'],
+                        'a6hinandh@gmail.com',
                         f"No Data Today - {today_str}",
                         no_data_html,
                         no_data_text,
@@ -1210,7 +1268,7 @@ Generated on: {datetime.now().strftime("%d/%m/%Y at %H:%M")}"""
                 # Send email
                 send_email_with_attachments_ses(
                     from_email,
-                    owner['email'],
+                    'a6hinandh@gmail.com',
                     f"{'Business Intelligence Report' if owner_template_no == 3 else 'Daily Report'} - {today_str} - {subject_suffix}",
                     html_content,
                     text_content,
