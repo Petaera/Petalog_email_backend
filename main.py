@@ -68,7 +68,7 @@ def now_ist() -> datetime:
 def format_now_ist(fmt: str = "%d/%m/%Y at %H:%M") -> str:
     return now_ist().strftime(fmt)
 
-def ist_day_utc_bounds(target_dt_ist: Optional[datetime] = None) -> (str, str):
+def ist_day_utc_bounds(target_dt_ist: Optional[datetime] = None) -> tuple[str, str]:
     """Return ISO UTC start/end of the day for IST calendar day.
 
     This ensures daily reports align with India time (UTC+05:30).
@@ -146,6 +146,16 @@ def get_owner_locations(owner: Dict[str, Any], locations: List[Dict[str, Any]]) 
             return [assigned]
     
     return []
+
+
+def get_active_owner_locations(owner: Dict[str, Any], locations: List[Dict[str, Any]]) -> List[str]:
+    """Return only the active locations assigned to an owner."""
+    active_location_ids = {
+        loc['id']
+        for loc in locations
+        if loc.get('is_active', True)
+    }
+    return [location_id for location_id in get_owner_locations(owner, locations) if location_id in active_location_ids]
 
 
 def escape_csv(value: Any) -> str:
@@ -1058,7 +1068,7 @@ def send_reports():
             logger.info(f"Fetching scheduled users from database: {user_ids}")
             
             # Fetch users from database
-            response = supabase.table('users').select('id,email,assigned_location,role,first_name,last_name').in_('id', user_ids).eq('role', 'owner').execute()
+            response = supabase.table('users').select('id,email,assigned_location,role,first_name,last_name,status').in_('id', user_ids).eq('role', 'owner').execute()
             owners = response.data
             
             # Fetch schedules for these users
@@ -1103,7 +1113,7 @@ def send_reports():
         elif owners is None:
             # Fallback: fetch all owners (backward compatibility)
             logger.warning("No scheduled users provided - using backward compatibility mode")
-            response = supabase.table('users').select('id,email,assigned_location,role,first_name,last_name').eq('role', 'owner').execute()
+            response = supabase.table('users').select('id,email,assigned_location,role,first_name,last_name,status').eq('role', 'owner').execute()
             owners = response.data
             
             # Fetch schedules for all owners
@@ -1165,18 +1175,30 @@ def send_reports():
                     'timezone': owner.get('timezone', 'N/A')
                 })
                 continue
-            
-            # Get all locations for this owner
-            owner_location_ids = get_owner_locations(owner, locations)
-            
-            if not owner_location_ids:
-                logger.info(f"Skipping owner {owner['email']}: no locations assigned")
+
+            if not owner.get('status', True):
+                logger.info(f"Skipping owner {owner['email']}: inactive user status")
                 emails_skipped += 1
                 email_results.append({
                     'owner': get_owner_display_name(owner),
                     'email': owner['email'],
                     'status': 'skipped',
-                    'reason': 'No locations assigned',
+                    'reason': 'Inactive user status',
+                    'timezone': owner.get('timezone', 'N/A')
+                })
+                continue
+            
+            # Get all locations for this owner
+            owner_location_ids = get_active_owner_locations(owner, locations)
+            
+            if not owner_location_ids:
+                logger.info(f"Skipping owner {owner['email']}: no active locations assigned")
+                emails_skipped += 1
+                email_results.append({
+                    'owner': get_owner_display_name(owner),
+                    'email': owner['email'],
+                    'status': 'skipped',
+                    'reason': 'No active locations assigned',
                     'timezone': owner.get('timezone', 'N/A')
                 })
                 continue
