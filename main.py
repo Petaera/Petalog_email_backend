@@ -130,8 +130,8 @@ def get_owner_locations(owner: Dict[str, Any], locations: List[Dict[str, Any]]) 
     """
     assigned = owner.get('assigned_location')
     
-    if not assigned:
-        # If no assignment, owner sees all locations
+    if assigned is None:
+        # If no assignment (None), owner sees all locations
         return [loc['id'] for loc in locations]
     
     # Handle array format
@@ -1144,6 +1144,38 @@ def send_reports():
                     owner['templateno'] = 1
                     owner['timezone'] = 'UTC'
         
+        # Query location_owners mapping from Supabase for all owners
+        if owners:
+            try:
+                user_ids_list = [owner['id'] for owner in owners if owner['id'] != 'override']
+                if user_ids_list:
+                    logger.info(f"Fetching location_owners mapping for users: {user_ids_list}")
+                    loc_owners_resp = supabase.table('location_owners').select('owner_id, location_id').in_('owner_id', user_ids_list).execute()
+                    loc_owners_data = loc_owners_resp.data or []
+                    logger.info(f"Fetched {len(loc_owners_data)} location-owner assignments")
+                    
+                    # Group by owner_id
+                    owner_to_locations = {}
+                    for row in loc_owners_data:
+                        oid = row['owner_id']
+                        lid = row['location_id']
+                        if oid not in owner_to_locations:
+                            owner_to_locations[oid] = []
+                        owner_to_locations[oid].append(lid)
+                    
+                    # Assign list of location IDs to each owner
+                    for owner in owners:
+                        if owner['id'] != 'override':
+                            owner['assigned_location'] = owner_to_locations.get(owner['id'], [])
+                else:
+                    logger.info("No database owners to fetch location_owners for")
+            except Exception as e:
+                logger.error(f"Failed to fetch location_owners: {e}")
+                # Fallback: leave assigned_location as empty list if not already present
+                for owner in owners:
+                    if owner['id'] != 'override' and 'assigned_location' not in owner:
+                        owner['assigned_location'] = []
+
         logger.info(f"Found {len(owners) if owners else 0} owners to process")
         
         # Verify SES connection
