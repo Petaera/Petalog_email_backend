@@ -29,7 +29,7 @@ class Query:
         self.filters = []
         self.action = "select"
         self.payload = None
-        self.offset, self.limit = 0, None
+        self.offset, self._limit = 0, None
         self.on_conflict = None
         self.ignore_duplicates = False
         db.calls.append(self)
@@ -72,11 +72,15 @@ class Query:
         return self
 
     def range(self, start, end):
-        self.offset, self.limit = start, end - start + 1
+        self.offset, self._limit = start, end - start + 1
         return self
 
-    def limit_(self, n):
-        self.limit = n
+    def limit(self, n):
+        self._limit = n
+        return self
+
+    def delete(self):
+        self.action = "delete"
         return self
 
     def update(self, payload):
@@ -98,8 +102,12 @@ class Query:
         rows = self.db.tables.setdefault(self.table_name, [])
         match = [r for r in rows if all(f(r) for f in self.filters)]
         if self.action == "select":
-            end = None if self.limit is None else self.offset + self.limit
+            end = None if self._limit is None else self.offset + self._limit
             return SimpleNamespace(data=[dict(r) for r in match[self.offset:end]])
+        if self.action == "delete":
+            for r in match:
+                rows.remove(r)
+            return SimpleNamespace(data=[dict(r) for r in match])
         if self.action == "update":
             for r in match:
                 r.update(self.payload)
