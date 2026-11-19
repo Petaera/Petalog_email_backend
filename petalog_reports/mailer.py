@@ -13,6 +13,11 @@ from .exports import Attachment
 
 logger = logging.getLogger(__name__)
 
+# RFC 5322 allows 998-character lines. With the default 78 a long header
+# without spaces (the List-Unsubscribe URL) gets RFC 2047-encoded, which mail
+# clients then fail to read as a URL.
+POLICY = SMTP.clone(max_line_length=998)
+
 RETRYABLE = {"Throttling", "ThrottlingException", "ServiceUnavailable", "InternalFailure", "RequestTimeout"}
 
 
@@ -26,7 +31,7 @@ def build_message(*, sender: str, to: Sequence[str], subject: str, html: str, te
                   attachments: Sequence[Attachment] = (), headers: Optional[Dict[str, str]] = None,
                   reply_to: Optional[str] = None) -> bytes:
     """multipart/mixed( multipart/alternative(text, html), attachments... )"""
-    msg = EmailMessage(policy=SMTP)
+    msg = EmailMessage(policy=POLICY)
     msg["Subject"] = subject
     msg["From"] = sender
     msg["To"] = ", ".join(to)
