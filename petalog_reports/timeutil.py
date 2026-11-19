@@ -86,7 +86,9 @@ def parse_ts(value) -> Optional[datetime]:
         dt = datetime.fromisoformat(text)
     except ValueError:
         try:
-            dt = datetime.combine(date.fromisoformat(text[:10]), time(0, 0), tzinfo=IST)
+            # A bare date compares like Postgres casting date -> timestamptz
+            # in the database's UTC session: midnight UTC.
+            dt = datetime.combine(date.fromisoformat(text[:10]), time(0, 0), tzinfo=UTC)
         except ValueError:
             return None
     if dt.tzinfo is None:
