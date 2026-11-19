@@ -114,10 +114,25 @@ def test_auth_rules():
     for body in ({"email_override": "x@evil.test", "users": [{"user_id": "o-1"}]},
                  {"email_override": "x@evil.test", "location_ids": ["loc-1"]},
                  {"users": [{"user_id": "o-1"}], "location_ids": ["loc-1"]},
-                 {"users": [{"user_id": "o-1"}], "templateno": 3},
                  {"trigger": "everyone"}):
         assert client.post("/send-reports", json=body, headers=auth(ANON)).status_code == 403
     assert ses.calls == []
+
+
+def test_anon_harmless_overrides_are_ignored_not_refused():
+    client, _, ses, _ = make()
+    body = {"users": [{"user_id": "o-1"}], "templateno": 1, "timezone": "UTC", "date": "2020-01-01"}
+    data = client.post("/send-reports", json=body, headers=auth(ANON)).get_json()
+    assert data["emailsSent"] == 1
+    assert data["results"][0]["templateUsed"] == 3  # the owner's own setting
+    assert data["reportDate"] == DAY.isoformat()
+
+
+def test_delivery_table_created_after_start_is_picked_up():
+    client, fake, _, service = make(broken={"report_deliveries"})
+    assert client.post("/v1/dispatch", headers=auth(SECRET)).status_code == 503
+    fake.broken.clear()
+    assert client.post("/v1/dispatch?wait=1", headers=auth(SECRET)).status_code == 200
 
 
 def test_anon_key_can_be_switched_off():

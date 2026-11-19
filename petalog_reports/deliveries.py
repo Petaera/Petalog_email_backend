@@ -47,14 +47,14 @@ class DeliveryLog:
     def available(self) -> bool:
         if not self.settings.delivery_tracking:
             return False
-        if self._available is None:
+        if not self._available:  # remember success only: a table created later is picked up
             try:
                 self.client.table(TABLE).select("id").limit(1).execute()
                 self._available = True
             except Exception as exc:  # noqa: BLE001
                 logger.warning("report_deliveries is not available (%s): duplicates cannot be prevented", exc)
                 self._available = False
-        return self._available
+        return bool(self._available)
 
     def _get(self, owner_id: str, report_date: date, kind: str):
         rows = (self.client.table(TABLE).select("id,status,attempts,claimed_at")

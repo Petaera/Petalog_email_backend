@@ -190,10 +190,13 @@ class ReportService:
         tz_override = payload.get("timezone")
         date_override = parse_date(payload.get("date")) if payload.get("date") else None
 
-        if not caller.trusted and (override or loc_override or tmpl_override not in (None, "")
-                                   or tz_override or date_override or not users):
-            return {"success": False, "error": "Forbidden",
-                    "message": "This key can only send the normal report to listed owners."}, 403
+        if not caller.trusted:
+            # The anon key is public: never let it redirect mail or widen what is sent.
+            if override or loc_override or not users:
+                return {"success": False, "error": "Forbidden",
+                        "message": "This key can only send the normal report to listed owners."}, 403
+            # Harmless fields an older trigger may send: ignored, owners get their own settings.
+            tmpl_override = tz_override = date_override = None
         if override and not EMAIL_RE.match(override):
             return {"success": False, "error": f"Invalid email_override: {override}"}, 400
         if not isinstance(users, list):
