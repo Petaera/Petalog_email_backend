@@ -1,0 +1,177 @@
+{% import 'macros.html.j2' as m %}
+
+{% macro pending_alert(count, amount) -%}
+{% if count %}
+<tr><td style="padding:16px 0 0 0;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:{{ t.warn_bg }};border:1px solid {{ t.warn_line }};border-radius:12px;">
+    <tr><td class="px" style="padding:14px 20px;font-family:{{ font }};font-size:14px;line-height:20px;color:{{ t.warn }};">
+      <strong>{{ count | num }} ticket{{ 's' if count != 1 }} ({{ amount | money }}) waiting for approval.</strong>
+      They are not in today's collections until approved.
+    </td></tr>
+  </table>
+</td></tr>
+{% endif %}
+{%- endmacro %}
+
+{% macro insights(items) -%}
+{% if items %}
+{% call m.card('Highlights') %}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+  {% for text in items %}
+  <tr><td style="padding:6px 0 6px 12px;border-left:3px solid {{ t.brand }};font-family:{{ font }};font-size:14px;line-height:21px;color:{{ t.text }};">{{ text }}</td></tr>
+  {% if not loop.last %}<tr><td style="height:8px;font-size:0;line-height:0;">&nbsp;</td></tr>{% endif %}
+  {% endfor %}
+</table>
+{% endcall %}
+{% endif %}
+{%- endmacro %}
+
+{% macro compare(rows) -%}
+{#- rows: list of {label, today, yesterday, last_week, kind} -#}
+{% call m.card('Compared with') %}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+  <tr>
+    <td style="padding:0 0 8px 0;font-family:{{ font }};font-size:12px;color:{{ t.muted }};">&nbsp;</td>
+    <td align="right" style="padding:0 0 8px 0;font-family:{{ font }};font-size:12px;color:{{ t.muted }};">Today</td>
+    <td align="right" class="hide-sm" style="padding:0 0 8px 12px;font-family:{{ font }};font-size:12px;color:{{ t.muted }};">Yesterday</td>
+    <td align="right" style="padding:0 0 8px 12px;font-family:{{ font }};font-size:12px;color:{{ t.muted }};">Last week</td>
+  </tr>
+  {% for row in rows %}
+  <tr>
+    <td style="padding:9px 0;border-top:1px solid {{ t.line }};font-family:{{ font }};font-size:14px;color:{{ t.text }};">{{ row.label }}</td>
+    <td align="right" style="padding:9px 0;border-top:1px solid {{ t.line }};font-family:{{ font }};font-size:14px;font-weight:700;color:{{ t.ink }};white-space:nowrap;">{{ row.today }}</td>
+    <td align="right" class="hide-sm" style="padding:9px 0 9px 12px;border-top:1px solid {{ t.line }};font-family:{{ font }};font-size:13px;color:{{ t.text }};white-space:nowrap;">{{ row.yesterday }}<br><span style="font-size:11px;color:{{ delta_color(row.d_yesterday, row.lower_is_better) }};">{{ row.d_yesterday | signed_pct }}</span></td>
+    <td align="right" style="padding:9px 0 9px 12px;border-top:1px solid {{ t.line }};font-family:{{ font }};font-size:13px;color:{{ t.text }};white-space:nowrap;">{{ row.last_week }}<br><span style="font-size:11px;color:{{ delta_color(row.d_week, row.lower_is_better) }};">{{ row.d_week | signed_pct }}</span></td>
+  </tr>
+  {% endfor %}
+</table>
+{% endcall %}
+{%- endmacro %}
+
+{% macro trend(items, title='Last 7 days') -%}
+{% call m.card(title, aside='Collections') %}
+{{ m.vbars(items, t.brand_soft, highlight_last=True) }}
+{% endcall %}
+{%- endmacro %}
+
+{% macro payments(L, bars) -%}
+{% if L.payments %}
+{% call m.card('How you were paid', aside=(L.figures.collections | money) ~ ' collected') %}
+{% if bars %}{{ m.stacked(L.payments) }}{{ m.spacer(10) }}{% endif %}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+  {% for row in L.payments %}
+  {{ m.row_line(row.label, row.amount | money, sub=((row.share | round | int) ~ '%' ~ ((' · ' ~ (row.count | num) ~ ' ticket' ~ ('s' if row.count != 1 else '')) if row.count else '')), color=mode_color(row.label), top_border=not loop.first) }}
+  {% for child in row.children %}
+  {{ m.row_line(child.label, child.amount | money, indent=True, top_border=False) }}
+  {% endfor %}
+  {% endfor %}
+</table>
+{% endcall %}
+{% endif %}
+{%- endmacro %}
+
+{% macro services(L, bars, limit=8) -%}
+{% if L.services %}
+{%- set shown = L.services[:limit] -%}
+{%- set rest = L.services[limit:] -%}
+{% call m.card('Services', aside='Value of the day\'s work') %}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+  {% for row in shown %}
+  <tr>
+    <td style="padding:9px 0 {{ 4 if bars else 9 }}px 0;{% if not loop.first %}border-top:1px solid {{ t.line }};{% endif %}font-family:{{ font }};font-size:14px;line-height:20px;color:{{ t.text }};">
+      {{ row.label }} <span style="color:{{ t.muted }};font-size:12px;">&nbsp;{{ row.count | num }} &middot; {{ row.share | round | int }}%</span>
+    </td>
+    <td align="right" style="padding:9px 0 {{ 4 if bars else 9 }}px 0;{% if not loop.first %}border-top:1px solid {{ t.line }};{% endif %}font-family:{{ font }};font-size:14px;line-height:20px;font-weight:600;color:{{ t.ink }};white-space:nowrap;">{{ row.amount | money }}</td>
+  </tr>
+  {% if bars %}<tr><td colspan="2" style="padding:0 0 10px 0;">{{ m.hbar(row.share, t.brand, 6) }}</td></tr>{% endif %}
+  {% endfor %}
+  {% if rest %}
+  {{ m.row_line((rest | length) ~ ' more service' ~ ('s' if rest | length != 1 else ''), (rest | sum(attribute='amount')) | money, indent=True) }}
+  {% endif %}
+</table>
+{% endcall %}
+{% endif %}
+{%- endmacro %}
+
+{% macro vehicles_and_customers(L, bars) -%}
+{% if L.vehicle_mix or L.customers_served %}
+{% call m.card('Vehicles & customers') %}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+  {% for row in L.vehicle_mix %}
+  <tr>
+    <td style="padding:8px 0 {{ 4 if bars else 8 }}px 0;{% if not loop.first %}border-top:1px solid {{ t.line }};{% endif %}font-family:{{ font }};font-size:14px;color:{{ t.text }};">{{ row.label }} <span style="color:{{ t.muted }};font-size:12px;">&nbsp;{{ row.share | round | int }}%</span></td>
+    <td align="right" style="padding:8px 0 {{ 4 if bars else 8 }}px 0;{% if not loop.first %}border-top:1px solid {{ t.line }};{% endif %}font-family:{{ font }};font-size:14px;font-weight:600;color:{{ t.ink }};white-space:nowrap;">{{ row.count | num }} &middot; {{ row.amount | money }}</td>
+  </tr>
+  {% if bars %}<tr><td colspan="2" style="padding:0 0 8px 0;">{{ m.hbar(row.share, t.cat_colors[loop.index0 % 3], 6) }}</td></tr>{% endif %}
+  {% endfor %}
+  {% if L.customers_served %}
+  {{ m.row_line('Customers served', L.customers_served | num, sub=((L.customers_new | num) ~ ' new · ' ~ (L.customers_returning | num) ~ ' returning'), top_border=L.vehicle_mix | length > 0) }}
+  {% endif %}
+</table>
+{% endcall %}
+{% endif %}
+{%- endmacro %}
+
+{% macro hourly(L) -%}
+{% if L.hourly and L.hourly | length > 1 %}
+{%- set items = [] -%}
+{% for h in L.hourly %}{% set _ = items.append({'label': h.label | replace(' AM', 'a') | replace(' PM', 'p'), 'value': h.count, 'caption': (h.count if h.count else '')}) %}{% endfor %}
+{% call m.card('Through the day', aside='Vehicles per hour') %}
+{{ m.vbars(items, t.brand, height=72) }}
+{% endcall %}
+{% endif %}
+{%- endmacro %}
+
+{% macro money_flow(L) -%}
+{% call m.card('Money in & out') %}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+  {{ m.row_line('Collections', L.figures.collections | money, strong=True, top_border=False) }}
+  {% for row in L.spending.by_category %}
+  {{ m.row_line(row.label, '−' ~ (row.amount | money), indent=True, top_border=loop.first) }}
+  {% endfor %}
+  {% if not L.spending.by_category %}{{ m.row_line('Spending', (0 | money)) }}{% endif %}
+  {{ m.row_line('Net for the day', L.net | money, strong=True, color=(t.pos if L.net >= 0 else t.neg)) }}
+</table>
+{%- set extras = [] -%}
+{% if L.cash_balance is not none %}{% set _ = extras.append(('Cash in hand (now)', L.cash_balance | money)) %}{% endif %}
+{% if L.figures.counter_sales %}{% set _ = extras.append(('Counter sales', L.figures.counter_sales | money)) %}{% endif %}
+{% if L.figures.items_sold %}{% set _ = extras.append(('Items sold (incl. with tickets)', L.figures.items_sold | money)) %}{% endif %}
+{% if L.figures.advance_received %}{% set _ = extras.append(('Advance received (not revenue yet)', L.figures.advance_received | money)) %}{% endif %}
+{% if L.figures.old_dues_collected %}{% set _ = extras.append(('Old dues collected', L.figures.old_dues_collected | money)) %}{% endif %}
+{% if L.figures.pay_later_amount %}{% set _ = extras.append(('Given on Pay Later today', L.figures.pay_later_amount | money)) %}{% endif %}
+{% if extras %}
+{{ m.spacer(12) }}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:{{ t.soft }};border-radius:10px;">
+  <tr><td style="padding:4px 16px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+      {% for label, value in extras %}{{ m.row_line(label, value, top_border=not loop.first) }}{% endfor %}
+    </table>
+  </td></tr>
+</table>
+{% endif %}
+{% endcall %}
+{%- endmacro %}
+
+{% macro team(L) -%}
+{% if L.staff %}
+{% call m.card('Team activity', aside='Entries recorded') %}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+  {% for row in L.staff[:8] %}
+  {{ m.row_line(row.label, (row.count | num) ~ ' · ' ~ (row.amount | money), top_border=not loop.first) }}
+  {% endfor %}
+</table>
+{% endcall %}
+{% endif %}
+{%- endmacro %}
+
+{% macro quiet_day(L) -%}
+{% call m.card() %}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+  <td align="center" style="padding:12px 0;font-family:{{ font }};">
+    <div style="font-size:16px;line-height:24px;font-weight:700;color:{{ t.ink }};">No entries recorded</div>
+    <div style="font-size:14px;line-height:21px;color:{{ t.text }};padding-top:6px;">Nothing was logged at {{ L.location.name }} on {{ L.day | long_date }}.
+    {% if L.last_week and L.last_week.collections %}<br>Same day last week: {{ L.last_week.collections | money }} from {{ L.last_week.vehicles | num }} vehicles.{% endif %}</div>
+  </td>
+</tr></table>
+{% endcall %}
+{%- endmacro %}

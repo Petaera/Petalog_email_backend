@@ -1,0 +1,99 @@
+{#- Email components. Tables + inline styles only: Gmail, Outlook and Apple
+    Mail all render these. No CSS grid, flexbox, gradients or images. -#}
+
+{% macro spacer(h) -%}
+<div style="height:{{ h }}px;line-height:{{ h }}px;font-size:0;">&nbsp;</div>
+{%- endmacro %}
+
+{% macro card(title=None, aside=None, pad=24) -%}
+<tr><td style="padding:16px 0 0 0;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:{{ t.card }};border:1px solid {{ t.line }};border-radius:12px;">
+    <tr><td class="px" style="padding:{{ pad - 4 }}px {{ pad }}px;">
+      {% if title %}
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+        <td style="font-family:{{ font }};font-size:12px;line-height:16px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:{{ t.muted }};">{{ title }}</td>
+        {% if aside %}<td align="right" style="font-family:{{ font }};font-size:12px;line-height:16px;color:{{ t.muted }};">{{ aside }}</td>{% endif %}
+      </tr></table>
+      {{ spacer(14) }}
+      {% endif %}
+      {{ caller() }}
+    </td></tr>
+  </table>
+</td></tr>
+{%- endmacro %}
+
+{% macro hbar(pct, color, height=8) -%}
+{%- set p = [[(pct or 0) | round(1), 0] | max, 100] | min -%}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+  {% if p > 0 %}<td width="{{ p }}%" height="{{ height }}" style="background:{{ color }};height:{{ height }}px;font-size:0;line-height:0;border-radius:{{ height // 2 }}px;">&nbsp;</td>{% endif %}
+  {% if p < 100 %}<td height="{{ height }}" style="background:{{ t.track }};height:{{ height }}px;font-size:0;line-height:0;border-radius:{{ height // 2 }}px;">&nbsp;</td>{% endif %}
+</tr></table>
+{%- endmacro %}
+
+{% macro stacked(rows, height=12) -%}
+{%- set shown = rows | selectattr('share', 'gt', 0.4) | list -%}
+{% if shown %}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+  {% for row in shown %}
+  <td width="{{ row.share | round(1) }}%" height="{{ height }}" style="background:{{ mode_color(row.label) }};height:{{ height }}px;font-size:0;line-height:0;{% if loop.first %}border-radius:{{ height // 2 }}px 0 0 {{ height // 2 }}px;{% endif %}{% if loop.last %}border-radius:0 {{ height // 2 }}px {{ height // 2 }}px 0;{% endif %}{% if loop.first and loop.last %}border-radius:{{ height // 2 }}px;{% endif %}">&nbsp;</td>
+  {% endfor %}
+</tr></table>
+{% endif %}
+{%- endmacro %}
+
+{% macro chip(value, label) -%}
+{% if value is not none %}
+{%- set up = value >= 0.5 -%}{%- set down = value <= -0.5 -%}
+<span style="display:inline-block;margin:0 6px 6px 0;padding:3px 9px;border-radius:999px;font-family:{{ font }};font-size:12px;line-height:16px;font-weight:600;
+  {%- if up %}background:{{ t.pos_bg }};color:{{ t.pos }};{% elif down %}background:{{ t.neg_bg }};color:{{ t.neg }};{% else %}background:{{ t.track }};color:{{ t.muted }};{% endif %}">
+  {%- if up %}&#9650; {% elif down %}&#9660; {% endif %}{{ value | signed_pct }} <span style="font-weight:400;">{{ label }}</span></span>
+{% endif %}
+{%- endmacro %}
+
+{% macro kpi(label, value, sub=None, tone=None) -%}
+<td class="stack" width="50%" valign="top" style="padding:0 6px 12px 6px;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:{{ t.soft }};border-radius:10px;">
+    <tr><td style="padding:14px 16px;">
+      <div style="font-family:{{ font }};font-size:12px;line-height:16px;color:{{ t.muted }};">{{ label }}</div>
+      <div class="kpi-value" style="font-family:{{ font }};font-size:24px;line-height:30px;font-weight:700;color:{{ tone or t.ink }};padding-top:4px;">{{ value }}</div>
+      {% if sub %}<div style="font-family:{{ font }};font-size:12px;line-height:16px;color:{{ t.muted }};padding-top:2px;">{{ sub }}</div>{% endif %}
+    </td></tr>
+  </table>
+</td>
+{%- endmacro %}
+
+{% macro row_line(label, value, sub=None, strong=False, indent=False, color=None, top_border=True) -%}
+<tr>
+  <td style="padding:9px 0;{% if top_border %}border-top:1px solid {{ t.line }};{% endif %}font-family:{{ font }};font-size:14px;line-height:20px;color:{{ t.text if not strong else t.ink }};{% if strong %}font-weight:700;{% endif %}{% if indent %}padding-left:18px;font-size:13px;color:{{ t.muted }};{% endif %}">
+    {% if color %}<span style="display:inline-block;width:8px;height:8px;border-radius:4px;background:{{ color }};margin-right:8px;"></span>{% endif %}{{ label }}
+    {% if sub %}<span style="color:{{ t.muted }};font-size:12px;">&nbsp;{{ sub }}</span>{% endif %}
+  </td>
+  <td align="right" style="padding:9px 0;{% if top_border %}border-top:1px solid {{ t.line }};{% endif %}font-family:{{ font }};font-size:14px;line-height:20px;white-space:nowrap;color:{{ t.ink }};{% if strong %}font-weight:700;{% else %}font-weight:600;{% endif %}{% if indent %}font-size:13px;font-weight:500;color:{{ t.text }};{% endif %}">{{ value }}</td>
+</tr>
+{%- endmacro %}
+
+{% macro vbars(items, color, highlight_last=False, height=96) -%}
+{#- items: list of dicts {label, value, caption} -#}
+{%- set top = (items | map(attribute='value') | max) if items else 0 -%}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+  {% for item in items %}
+  {%- set h = ((item.value / top * height) | round(0, 'ceil') | int) if top > 0 else 0 -%}
+  {%- set h = [h, 2] | max if item.value > 0 else 0 -%}
+  <td valign="bottom" align="center" style="padding:0 2px;">
+    {% if item.caption %}<div style="font-family:{{ font }};font-size:10px;line-height:12px;color:{{ t.muted }};padding-bottom:3px;white-space:nowrap;">{{ item.caption }}</div>{% endif %}
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+      <td height="{{ h if h > 0 else 1 }}" style="height:{{ h if h > 0 else 1 }}px;font-size:0;line-height:0;background:{{ (t.brand if (highlight_last and loop.last) else color) if h > 0 else t.line }};border-radius:3px 3px 0 0;">&nbsp;</td>
+    </tr></table>
+    <div style="font-family:{{ font }};font-size:10px;line-height:14px;color:{{ t.muted }};padding-top:4px;white-space:nowrap;{% if highlight_last and loop.last %}font-weight:700;color:{{ t.ink }};{% endif %}">{{ item.label }}</div>
+  </td>
+  {% endfor %}
+</tr></table>
+{%- endmacro %}
+
+{% macro button(href, label) -%}
+<table role="presentation" cellpadding="0" cellspacing="0" align="center"><tr>
+  <td align="center" bgcolor="{{ t.brand }}" style="border-radius:8px;">
+    <a href="{{ href }}" target="_blank" style="display:inline-block;padding:12px 26px;font-family:{{ font }};font-size:14px;line-height:20px;font-weight:600;color:#FFFFFF;text-decoration:none;border-radius:8px;">{{ label }}</a>
+  </td>
+</tr></table>
+{%- endmacro %}

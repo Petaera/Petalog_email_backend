@@ -1,0 +1,148 @@
+{% import 'macros.html.j2' as m %}
+{% import 'sections.html.j2' as s %}
+<!DOCTYPE html>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="x-apple-disable-message-reformatting">
+<meta name="format-detection" content="telephone=no, date=no, address=no, email=no">
+<meta name="color-scheme" content="light">
+<meta name="supported-color-schemes" content="light">
+<title>{{ subject }}</title>
+<style>
+  body { margin:0; padding:0; -webkit-text-size-adjust:100%; -ms-text-size-adjust:100%; }
+  table { border-collapse:collapse; mso-table-lspace:0; mso-table-rspace:0; }
+  img { border:0; outline:none; text-decoration:none; -ms-interpolation-mode:bicubic; }
+  a { color:{{ t.brand }}; }
+  @media only screen and (max-width:620px) {
+    .container { width:100% !important; }
+    .px { padding-left:16px !important; padding-right:16px !important; }
+    .stack { display:block !important; width:100% !important; box-sizing:border-box; padding-left:0 !important; padding-right:0 !important; }
+    .hide-sm { display:none !important; }
+    .hero-value { font-size:32px !important; line-height:38px !important; }
+    .kpi-value { font-size:22px !important; }
+  }
+</style>
+</head>
+<body style="margin:0;padding:0;background:{{ t.page }};">
+<div style="display:none;max-height:0;max-width:0;overflow:hidden;opacity:0;mso-hide:all;font-size:1px;line-height:1px;color:{{ t.page }};">{{ preheader }}{% for _ in range(40) %}&#847;&zwnj;&nbsp;{% endfor %}</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="{{ t.page }}" style="background:{{ t.page }};">
+<tr><td align="center" style="padding:24px 12px 32px 12px;">
+<table role="presentation" class="container" width="600" cellpadding="0" cellspacing="0" style="width:600px;max-width:600px;">
+
+  {# ---------- Brand bar ---------- #}
+  <tr><td style="padding:0 4px 12px 4px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+      <td valign="middle" style="font-family:{{ font }};font-size:16px;line-height:24px;font-weight:700;color:{{ t.ink }};">
+        <img src="{{ brand.logo }}" width="26" height="26" alt="" style="vertical-align:middle;border-radius:6px;margin-right:8px;">{{ brand.name }}
+      </td>
+      <td align="right" valign="middle" style="font-family:{{ font }};font-size:12px;line-height:16px;color:{{ t.muted }};">{{ variant.name }} &middot; Daily report</td>
+    </tr></table>
+  </td></tr>
+
+  {# ---------- Hero ---------- #}
+  <tr><td>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:{{ t.card }};border:1px solid {{ t.line }};border-radius:12px;border-top:4px solid {{ t.brand }};">
+      <tr><td class="px" style="padding:24px 24px 12px 24px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+          {% if hero.logo %}<td width="52" valign="middle" style="padding-right:12px;"><img src="{{ hero.logo }}" width="44" height="44" alt="" style="display:block;border-radius:10px;border:1px solid {{ t.line }};"></td>{% endif %}
+          <td valign="middle" style="font-family:{{ font }};">
+            <div style="font-size:22px;line-height:28px;font-weight:700;color:{{ t.ink }};">{{ hero.title }}</div>
+            <div style="font-size:14px;line-height:20px;color:{{ t.muted }};padding-top:2px;">{{ hero.subtitle }}</div>
+          </td>
+        </tr></table>
+        {{ m.spacer(20) }}
+        <div style="font-family:{{ font }};font-size:13px;line-height:18px;color:{{ t.muted }};">Collections</div>
+        <div class="hero-value" style="font-family:{{ font }};font-size:40px;line-height:46px;font-weight:800;color:{{ t.ink }};letter-spacing:-0.02em;padding:2px 0 8px 0;">{{ hero.collections | money }}</div>
+        <div>{{ m.chip(hero.d_yesterday, 'vs yesterday') }}{{ m.chip(hero.d_week, 'vs last ' ~ hero.weekday) }}</div>
+        {{ m.spacer(12) }}
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 -6px;">
+          <tr>
+            {{ m.kpi('Vehicles served', hero.vehicles | num, sub=hero.vehicle_split) }}
+            {{ m.kpi('Average per vehicle', hero.avg | money(0), sub=((hero.collection_count | num) ~ ' paid tickets')) }}
+          </tr>
+          <tr>
+            {{ m.kpi('Pay Later today', hero.pay_later | money, sub=((hero.pay_later_count | num) ~ ' ticket' ~ ('s' if hero.pay_later_count != 1 else ''))) }}
+            {{ m.kpi('Net for the day', hero.net | money, sub='Collections − spending ' ~ (hero.spending | money), tone=(t.pos if hero.net >= 0 else t.neg)) }}
+          </tr>
+        </table>
+      </td></tr>
+    </table>
+  </td></tr>
+
+  {{ s.pending_alert(hero.pending_count, hero.pending_amount) }}
+
+  {% if report.is_multi %}
+    {# ---------- Several locations ---------- #}
+    {% if variant.insights %}{{ s.insights(owner_insights) }}{% endif %}
+    {% call m.card('Locations', aside='Collections · Vehicles · Net') %}
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+      {% for L in report.locations %}
+      <tr>
+        <td style="padding:10px 0;{% if not loop.first %}border-top:1px solid {{ t.line }};{% endif %}font-family:{{ font }};font-size:14px;line-height:20px;color:{{ t.ink }};font-weight:600;">
+          {{ L.location.name }}
+          <div style="font-weight:400;font-size:12px;color:{{ t.muted }};">{{ L.figures.vehicles | num }} vehicles{% if L.figures.pending_count %} &middot; {{ L.figures.pending_count | num }} pending{% endif %}{% if L.last_week %} &middot; <span style="color:{{ delta_color(delta(L.figures.collections, L.last_week.collections)) }};">{{ delta(L.figures.collections, L.last_week.collections) | signed_pct }} vs last week</span>{% endif %}</div>
+          {% if variant.bars %}{{ m.spacer(6) }}{{ m.hbar(share(L.figures.collections, hero.collections), t.brand, 6) }}{% endif %}
+        </td>
+        <td align="right" valign="top" style="padding:10px 0 10px 12px;{% if not loop.first %}border-top:1px solid {{ t.line }};{% endif %}font-family:{{ font }};font-size:14px;line-height:20px;white-space:nowrap;">
+          <strong style="color:{{ t.ink }};">{{ L.figures.collections | money }}</strong>
+          <div style="font-size:12px;color:{{ t.pos if L.net >= 0 else t.neg }};">net {{ L.net | money }}</div>
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% endcall %}
+    {% if variant.trend and trend_items %}{{ s.trend(trend_items, 'Last 7 days, all locations') }}{% endif %}
+    {% for L in report.locations %}
+      <tr><td style="padding:28px 4px 0 4px;font-family:{{ font }};">
+        <div style="font-size:18px;line-height:24px;font-weight:700;color:{{ t.ink }};">{{ L.location.name }}</div>
+        <div style="font-size:13px;line-height:18px;color:{{ t.muted }};">{{ L.figures.collections | money }} collected &middot; {{ L.figures.vehicles | num }} vehicles &middot; Pay Later {{ L.figures.pay_later_amount | money }}</div>
+      </td></tr>
+      {% if not L.figures.has_activity %}
+        {{ s.quiet_day(L) }}
+      {% else %}
+        {% if variant.insights %}{{ s.insights(L.insights[:3]) }}{% endif %}
+        {{ s.payments(L, variant.bars) }}
+        {{ s.services(L, variant.bars, 5) }}
+        {{ s.money_flow(L) }}
+      {% endif %}
+    {% endfor %}
+  {% else %}
+    {# ---------- One location ---------- #}
+    {%- set L = report.locations[0] -%}
+    {% if not L.figures.has_activity %}
+      {{ s.quiet_day(L) }}
+    {% else %}
+      {% if variant.insights %}{{ s.insights(L.insights) }}{% endif %}
+      {% if variant.compare and compare_rows %}{{ s.compare(compare_rows) }}{% endif %}
+      {% if variant.trend and trend_items %}{{ s.trend(trend_items) }}{% endif %}
+      {{ s.payments(L, variant.bars) }}
+      {{ s.services(L, variant.bars) }}
+      {{ s.vehicles_and_customers(L, variant.bars) }}
+      {% if variant.bars %}{{ s.hourly(L) }}{% endif %}
+      {{ s.money_flow(L) }}
+      {{ s.team(L) }}
+    {% endif %}
+  {% endif %}
+
+  {# ---------- Call to action ---------- #}
+  <tr><td style="padding:24px 0 0 0;">
+    {{ m.button(links.dashboard, 'Open dashboard') }}
+    {% if attachment_note %}<div style="font-family:{{ font }};font-size:12px;line-height:18px;color:{{ t.muted }};text-align:center;padding-top:12px;">{{ attachment_note }}</div>{% endif %}
+  </td></tr>
+
+  {# ---------- Footer ---------- #}
+  <tr><td style="padding:28px 8px 0 8px;font-family:{{ font }};font-size:12px;line-height:18px;color:{{ t.muted }};text-align:center;">
+    {% if warnings %}<div style="padding-bottom:10px;color:{{ t.warn }};">Not included this time (could not be loaded): {{ warnings | join(', ') }}.</div>{% endif %}
+    Figures follow the PetaLog dashboard for the business day {{ report.day | long_date }} (India time). Generated {{ generated_label }}.<br>
+    You get this email because daily reports are on for your PetaLog account.
+    <a href="{{ links.settings }}" style="color:{{ t.muted }};text-decoration:underline;">Change time or template</a>{% if links.unsubscribe %} &middot; <a href="{{ links.unsubscribe }}" style="color:{{ t.muted }};text-decoration:underline;">Stop these emails</a>{% endif %}
+    <div style="padding-top:12px;color:{{ t.faint }};">{{ brand.name }} &middot; {{ brand.site }}</div>
+  </td></tr>
+
+</table>
+</td></tr>
+</table>
+</body>
+</html>

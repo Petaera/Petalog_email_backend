@@ -413,7 +413,7 @@ def payment_rows(ctx: DayContext, day: date, figures: DayFigures) -> List[Breakd
     children = sorted(accounts.values(), key=lambda r: -r.amount)
     rest = figures.upi - sum(c.amount for c in children)
     if children and rest > 0.5:
-        children.append(BreakdownRow("Counter sales, old dues & plans", rest))
+        children.append(BreakdownRow("Counter sales & other", rest))
     upi.children = _share_rows(children, figures.upi) if len(children) > 1 or rest > 0.5 else []
     rows = [
         BreakdownRow("Cash", figures.cash, len(counts["cash"])),

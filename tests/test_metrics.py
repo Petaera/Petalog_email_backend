@@ -63,7 +63,7 @@ def test_payment_rows_with_upi_accounts(report):
     assert rows["UPI"].amount == 470
     accounts = {c.label: c.amount for c in rows["UPI"].children}
     assert accounts["Shop GPay"] == 350  # L2 250 + L4 part 100
-    assert accounts["Counter sales, old dues & plans"] == 120
+    assert accounts["Counter sales & other"] == 120
     assert rows["From advance"].amount == 230
     assert round(sum(r.share for r in report.payments)) == 100
 
