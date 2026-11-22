@@ -13,7 +13,7 @@ You need:
 
 - Access to the Supabase dashboard and the Render dashboard.
 - The Supabase CLI for phase 3 (`npm i -g supabase`, then `supabase login`).
-- **The Render service URL.** Below it is written as `https://<render-url>`.
+- **The Render service URL:** `https://petalog-email-backend.onrender.com`. Render deploys `main`, and deploys are started by hand.
 
 ---
 
@@ -52,7 +52,7 @@ Keep every existing variable. Add these:
 | Variable | Value |
 |---|---|
 | `REPORTS_API_SECRET` | the secret you generated |
-| `REPORTS_PUBLIC_URL` | `https://<render-url>` (used for unsubscribe links) |
+| `REPORTS_PUBLIC_URL` | `https://petalog-email-backend.onrender.com` (used for unsubscribe links) |
 | `ADMIN_REPORT_EMAIL` | optional: where failure summaries go. Default is the `SES_VERIFIED_FROM` address. |
 
 Leave `ALLOW_ANON_KEY_AUTH` unset (it defaults to `true`) until phase 4. The current edge function may be using the anon key.
@@ -61,10 +61,13 @@ The other variables in [.env.example](.env.example) are optional, and their defa
 
 ### 2.2 Deploy
 
-Merge `feature/reports-v2` into the branch Render deploys, then push. For example, if Render deploys `main`:
+Render deploys `main`. Bring local `main` up to date with GitHub, merge, and push:
 
 ```powershell
 git checkout main
+```
+```powershell
+git pull --ff-only origin main
 ```
 ```powershell
 git merge --no-ff feature/reports-v2
@@ -73,14 +76,14 @@ git merge --no-ff feature/reports-v2
 git push origin main
 ```
 
-Render builds and deploys. The build is faster than before because matplotlib and numpy are gone.
+Then in Render choose **Manual Deploy → Deploy latest commit**. The build is faster than before because matplotlib and numpy are gone.
 
 ### 2.3 Check it
 
 The examples use these PowerShell variables. Set them first:
 
 ```powershell
-$base = "https://<render-url>"; $secret = "<REPORTS_API_SECRET>"; $h = @{ Authorization = "Bearer $secret" }
+$base = "https://petalog-email-backend.onrender.com"; $secret = "<REPORTS_API_SECRET>"; $h = @{ Authorization = "Bearer $secret" }
 ```
 
 1. **Health.** Expect `"version": "2.0.0"`.
@@ -119,7 +122,7 @@ Run these from the backend repository root.
 
 1. Set the edge function's secrets and deploy it:
    ```powershell
-   supabase secrets set REPORTS_BACKEND_URL=https://<render-url> REPORTS_API_SECRET=<secret> --project-ref poqzxjhsdbwfnooftiwe
+   supabase secrets set REPORTS_BACKEND_URL=https://petalog-email-backend.onrender.com REPORTS_API_SECRET=<secret> --project-ref poqzxjhsdbwfnooftiwe
    ```
    ```powershell
    supabase functions deploy report-dispatch --project-ref poqzxjhsdbwfnooftiwe
