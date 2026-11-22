@@ -1,0 +1,6 @@
+# Only used to deploy the report-dispatch edge function from this repository:
+#   supabase functions deploy report-dispatch --project-ref poqzxjhsdbwfnooftiwe
+project_id = "petalog-email-backend"
+
+[functions.report-dispatch]
+verify_jwt = true
