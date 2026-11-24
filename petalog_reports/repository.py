@@ -9,8 +9,10 @@ in chunks to keep URLs short.
 from __future__ import annotations
 
 import logging
+import re
 from datetime import date, timedelta
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Set
+from urllib.parse import unquote
 
 from .config import Settings
 from .models import Location, LocationDataset, Owner, Schedule
@@ -161,6 +163,26 @@ class SupabaseRepository:
             result.setdefault(str(row["owner_id"]), set()).add(str(row["location_id"]))
         return {k: sorted(v) for k, v in result.items()}
 
+    # Storage buckets are private (2026-11-26): a logo saved as a storage link is shown in the
+    # email through a signed link, long enough for an email opened weeks later.
+    _STORAGE_LINK = re.compile(r"/storage/v1/object/(?:public|sign|authenticated)/([^/?#]+)/([^?#]+)")
+    LOGO_LINK_SECONDS = 60 * 60 * 24 * 30
+
+    def _email_logo(self, url: Optional[str]) -> Optional[str]:
+        if not url:
+            return None
+        match = self._STORAGE_LINK.search(url)
+        if not match:
+            return url
+        bucket, path = match.group(1), unquote(match.group(2))
+        try:
+            signed = self.client.storage.from_(bucket).create_signed_url(path, self.LOGO_LINK_SECONDS)
+            link = (signed or {}).get("signedURL") or (signed or {}).get("signedUrl") or (signed or {}).get("signed_url")
+            return link or url
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Could not sign the logo link, using it as saved: %s", exc)
+            return url
+
     def get_locations(self, ids: Sequence[str]) -> Dict[str, Location]:
         rows = self._in("locations", "id,name,logo_url,own_id,is_active,city", "id", ids)
         statuses: Dict[str, str] = {}
@@ -171,7 +193,7 @@ class SupabaseRepository:
             logger.warning("Billing status unavailable, not filtering on it: %s", exc)
         return {
             str(r["id"]): Location(
-                id=str(r["id"]), name=(r.get("name") or "Location").strip(), logo_url=r.get("logo_url") or None,
+                id=str(r["id"]), name=(r.get("name") or "Location").strip(), logo_url=self._email_logo(r.get("logo_url")),
                 own_id=r.get("own_id"), is_active=r.get("is_active") is not False,
                 billing_status=statuses.get(str(r["id"])), city=r.get("city"),
             )
