@@ -102,3 +102,54 @@ def test_paging_reads_every_row():
     r = repo(FakeSupabase({"log-man": rows}))
     got = r._all(lambda: r.table("log-man").select("id"))
     assert len(got) == PAGE_SIZE * 2 + 5
+
+
+class _FakeBucket:
+    def __init__(self, calls, fail=False):
+        self.calls, self.fail = calls, fail
+
+    def create_signed_url(self, path, seconds):
+        if self.fail:
+            raise RuntimeError("no such file")
+        self.calls.append((path, seconds))
+        return {"signedURL": f"https://x.supabase.co/storage/v1/object/sign/uploads/{path}?token=t"}
+
+
+class _FakeStorage:
+    def __init__(self, calls, fail=False):
+        self.calls, self.fail, self.buckets = calls, fail, []
+
+    def from_(self, bucket):
+        self.buckets.append(bucket)
+        return _FakeBucket(self.calls, self.fail)
+
+
+class _FakeClient:
+    def __init__(self, fail=False):
+        self.calls = []
+        self.storage = _FakeStorage(self.calls, fail)
+
+
+def test_logo_in_private_storage_is_signed_for_the_email():
+    from petalog_reports.config import Settings
+    from petalog_reports.repository import SupabaseRepository
+
+    client = _FakeClient()
+    repo = SupabaseRepository(Settings(), client=client)
+    url = "https://x.supabase.co/storage/v1/object/public/uploads/location-logos/abc%20logo.png"
+    signed = repo._email_logo(url)
+    assert "token=" in signed
+    assert client.calls == [("location-logos/abc logo.png", 60 * 60 * 24 * 30)]
+    assert client.storage.buckets == ["uploads"]
+    # not a storage link: unchanged; empty: None
+    assert repo._email_logo("https://cdn.example.com/logo.png") == "https://cdn.example.com/logo.png"
+    assert repo._email_logo(None) is None
+
+
+def test_logo_left_as_saved_when_it_cannot_be_signed():
+    from petalog_reports.config import Settings
+    from petalog_reports.repository import SupabaseRepository
+
+    repo = SupabaseRepository(Settings(), client=_FakeClient(fail=True))
+    url = "https://x.supabase.co/storage/v1/object/public/uploads/location-logos/a.png"
+    assert repo._email_logo(url) == url
